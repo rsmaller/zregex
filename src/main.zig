@@ -8,7 +8,10 @@ pub fn main() !void {
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
 
-    const pattern: []const u8 = "\\n(|)(\\d{3,}|)[^\\t-\\n]-(|\\d{,5})-(\\d{,}|-\\d{15})";
+    // const pattern: []const u8 = "\\n(|)(\\d{3,}|)[^\\t-\\n][abc]-(|\\d{,5})-(\\d{,}|-\\d{15})";
+    const pattern: []const u8 = "a";
+    // const pattern: []const u8 = "a{";
+    // const pattern: []const u8 = "yes";
     const regexAST: *zregex.RegexPattern = try zregex.compileRegex(allocator, pattern);
     try stdout.print("Pattern: {s}\n", .{pattern});
     try stdout.flush();
