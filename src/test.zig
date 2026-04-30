@@ -1,7 +1,7 @@
 const std = @import("std");
 const zregex = @import("./root.zig");
 
-fn expectASTEqual(a: *const zregex.RegexPattern, b: *const zregex.RegexPattern) !void {
+fn expectASTEqual(a: zregex.RegexPattern, b: zregex.RegexPattern) !void {
     try std.testing.expect(@intFromEnum(a.*) == @intFromEnum(b.*));
     switch (a.*) {
         .literal => |lit| {
@@ -23,6 +23,11 @@ fn expectASTEqual(a: *const zregex.RegexPattern, b: *const zregex.RegexPattern) 
             for (concat, 0..) |_, i| {
                 try expectASTEqual(concat[i], b.concatenation[i]);
             }
+        },
+        .group => |grp| {
+            try std.testing.expect(grp.id == b.group.id);
+            try std.testing.expect(grp.capturing == b.group.capturing);
+            try expectASTEqual(grp.expr, b.group.expr);
         },
         .repetition => |rep| {
             try std.testing.expect(rep.reps_min == b.repetition.reps_min);
@@ -51,27 +56,8 @@ test "a" {
     const compiledPattern = try zregex.compileRegex(allocator, pattern);
     defer zregex.destroyRegexPattern(allocator, compiledPattern) catch @panic("Could not free pattern!");
 
-    var testAST = &zregex.RegexPattern{
-        .alternation = try allocator.alloc(*zregex.RegexPattern, 1),
-    };
-    defer allocator.free(testAST.alternation);
-
-    testAST.alternation[0] = try allocator.create(zregex.RegexPattern);
-    defer allocator.destroy(testAST.alternation[0]);
-
-    testAST.alternation[0].* = .{
-        .concatenation = try allocator.alloc(*zregex.RegexPattern, 1),
-    };
-    defer allocator.free(testAST.alternation[0].concatenation);
-
-    testAST.alternation[0].concatenation[0] = try allocator.create(zregex.RegexPattern);
-    defer allocator.destroy(testAST.alternation[0].concatenation[0]);
-
-    testAST.alternation[0].concatenation[0].* = .{
-        .literal = .{
-            .character = 'a',
-            .metacharacter = false,
-        }
+    const testAST: zregex.RegexPattern = &.{
+        .literal = .{.character = 'a', .metacharacter = false},
     };
 
     try expectASTEqual(testAST, compiledPattern);
