@@ -41,6 +41,8 @@ const RegexAST = union(enum) { // Tagged union for node type.
     epsilon: void, // Generic empty node.
 };
 
+var EPSILON_UNIT: RegexAST = .epsilon; // Generic epsilon copy used everywhere; contains no data.
+
 pub const RegexParsingError = error{
     TokenNotFound,
     EndOfString,
@@ -66,9 +68,7 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         allocator.destroy(result);
     }
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
-        const toAdd = try allocator.create(RegexAST);
-        toAdd.* = .epsilon;
-        try resultList.append(allocator, toAdd);
+        try resultList.append(allocator, &EPSILON_UNIT);
     } else { // If not an epsilon, just parse the first alternation as a regular term.
         try resultList.append(allocator, try parseRegexTerm(allocator, str_to_parse, i));
     }
@@ -78,9 +78,7 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             break;
         }
         if (str_to_parse[i.*] == ')') { // Handle epsilon as the last alternation argument.
-            const toAdd = try allocator.create(RegexAST);
-            toAdd.* = .epsilon;
-            try resultList.append(allocator, toAdd);
+            try resultList.append(allocator, &EPSILON_UNIT);
             break;
         }
         try resultList.append(allocator, try parseRegexTerm(allocator, str_to_parse, i)); // Handle generic terms in alternation not caught by edge cases.
@@ -456,7 +454,7 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
                 try printRegexASTRecursive(out_interface, classItem.items[i], recursionLevel + 1);
             }
         },
-        .epsilon => |_| {
+        .epsilon => {
             try out_interface.print("EPSILON()\n", .{});
         },
     }
@@ -490,7 +488,9 @@ pub fn destroyRegexPattern(allocator: anytype, pattern: RegexPattern) !void {
             }
             allocator.free(classItem.items);
         },
-        .epsilon => {}, // Epsilons contain no data and are always the same.
+        .epsilon => {
+            return;
+        }, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
     }
     allocator.destroy(pattern);
 }
