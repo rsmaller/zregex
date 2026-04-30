@@ -13,20 +13,21 @@ fn expectASTEqual(a: zregex.RegexPattern, b: zregex.RegexPattern) !void {
             try std.testing.expect(range.character_max == b.range.character_max);
         },
         .alternation => |alt| {
-            try std.testing.expect(alt.len == b.alternation.len);
-            for (alt, 0..) |_, i| {
-                try expectASTEqual(alt[i], b.alternation[i]);
+            try std.testing.expect(alt.parts.len == b.alternation.parts.len);
+            for (alt.parts, 0..) |_, i| {
+                try expectASTEqual(alt.parts[i], b.alternation.parts[i]);
             }
         },
         .concatenation => |concat| {
-            try std.testing.expect(concat.len == b.concatenation.len);
-            for (concat, 0..) |_, i| {
-                try expectASTEqual(concat[i], b.concatenation[i]);
+            try std.testing.expect(concat.parts.len == b.concatenation.parts.len);
+            for (concat.parts, 0..) |_, i| {
+                try expectASTEqual(concat.parts[i], b.concatenation.parts[i]);
             }
         },
         .group => |grp| {
             try std.testing.expect(grp.id == b.group.id);
             try std.testing.expect(grp.capturing == b.group.capturing);
+            try std.testing.expect(grp.group_type == b.group.group_type);
             try expectASTEqual(grp.expr, b.group.expr);
         },
         .repetition => |rep| {

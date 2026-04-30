@@ -13,7 +13,7 @@ pub fn main() !void {
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
 
-    const pattern: []const u8 = "(abc)\\n(|)(\\d{3,}+|)[^\\t-\\n][abc]-(|\\d{,5})-(\\d{,}|-\\d{15})";
+    const pattern: []const u8 = "(abc)\\n(|)(?=\\d{3,}+|)[^\\t-\\n][abc]-(|\\d{,5})-(\\d{,}|-\\d{15})";
     // const pattern: []const u8 = "a";
     // const pattern: []const u8 = "a{";
     // const pattern: []const u8 = "yes";

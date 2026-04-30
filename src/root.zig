@@ -12,13 +12,22 @@ const RegexAST = union(enum) { // Tagged union for node type.
         character_min: u8,
         character_max: u8,
     },
-    concatenation: []*RegexAST, // Operation chaining two characters together.
+    concatenation: struct {
+        parts: []*RegexAST, // Operation chaining two characters together.
+    },
+    alternation: struct{
+        parts: []*RegexAST,
+    }, // Same as concatenation but semantically different and in a higher order function.
     group: struct {
         expr: *RegexAST,
         capturing: bool,
         id: usize,
+        group_type: enum {
+            regular,
+            lookahead,
+            lookbehind
+        },
     },
-    alternation: []*RegexAST, // Same as concatenation but semantically different and in a higher order function.
     repetition: struct { // Parent node to another node constructed by a quantifier.
         child: *RegexAST,
         reps_min: usize,
@@ -77,7 +86,7 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         try resultList.append(allocator, try parseRegexTerm(allocator, str_to_parse, i)); // Handle generic terms in alternation not caught by edge cases.
     }
     const listSlice = try resultList.toOwnedSlice(allocator);
-    result.* = .{ .alternation = listSlice }; // Start parsing alternations first, and assume 2 alternations minimum.
+    result.* = .{ .alternation = .{.parts = listSlice } }; // Start parsing alternations first, and assume 2 alternations minimum.
     if (listSlice.len == 1) {
         allocator.destroy(result);
         result = listSlice[0];
@@ -104,7 +113,7 @@ fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         try resultList.append(allocator, try parseRegexFactor(allocator, str_to_parse, i));
     }
     const listSlice = try resultList.toOwnedSlice(allocator);
-    result.* = .{ .concatenation = listSlice };
+    result.* = .{ .concatenation = .{.parts = listSlice} };
     if (listSlice.len == 1) {
         allocator.destroy(result);
         result = listSlice[0];
@@ -161,7 +170,7 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
             result = undefined;               // parse lookahead here with special logic.
         } else {
             result = try allocator.create(RegexAST);
-            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = true, .id = 0}};  // Parse expression within concat group.
+            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = true, .id = 0, .group_type = .regular}};  // Parse expression within concat group.
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
             return RegexParsingError.TokenNotFound;
@@ -427,18 +436,18 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
         },
         .alternation => |alt| {
             try out_interface.print("ALTERNATION()\n", .{});
-            for (0..alt.len) |i| {
-                try printRegexASTRecursive(out_interface, alt[i], recursionLevel + 1);
+            for (0..alt.parts.len) |i| {
+                try printRegexASTRecursive(out_interface, alt.parts[i], recursionLevel + 1);
             }
         },
         .group => |grp| {
-            try out_interface.print("GROUP(capturing = {}, id = {})\n", .{grp.capturing, grp.id});
+            try out_interface.print("GROUP(capturing = {}, id = {}, type = {s})\n", .{grp.capturing, grp.id, @tagName(grp.group_type)});
             try printRegexASTRecursive(out_interface, grp.expr, recursionLevel + 1);
         },
         .concatenation => |concat| {
             try out_interface.print("CONCATENATION()\n", .{});
-            for (0..concat.len) |i| {
-                try printRegexASTRecursive(out_interface, concat[i], recursionLevel + 1);
+            for (0..concat.parts.len) |i| {
+                try printRegexASTRecursive(out_interface, concat.parts[i], recursionLevel + 1);
             }
         },
         .class => |classItem| {
@@ -458,16 +467,16 @@ pub fn destroyRegexPattern(allocator: anytype, pattern: RegexPattern) !void {
         .literal => {},
         .range => {},
         .alternation => |alt| {
-            for (alt) |item| {
+            for (alt.parts) |item| {
                 try destroyRegexPattern(allocator, item);
             }
-            allocator.free(alt);
+            allocator.free(alt.parts);
         },
         .concatenation => |concat| {
-            for (concat) |item| {
+            for (concat.parts) |item| {
                 try destroyRegexPattern(allocator, item);
             }
-            allocator.free(concat);
+            allocator.free(concat.parts);
         },
         .group => |grp| {
             try destroyRegexPattern(allocator, grp.expr);
