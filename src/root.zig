@@ -3,6 +3,21 @@ const std = @import("std");
 
 pub const RegexPattern = *const RegexAST;
 
+const RegexRepeaterType = enum {
+    greedy,
+    lazy,
+    possessive,
+};
+
+const RegexGroupType = enum {
+    regular,
+    positive_lookahead,
+    positive_lookbehind,
+    negative_lookahead,
+    negative_lookbehind,
+    non_capturing,
+};
+
 const RegexAST = union(enum) { // Tagged union for node type.
     literal: struct { // Generic single characters.
         metacharacter: bool,
@@ -21,18 +36,14 @@ const RegexAST = union(enum) { // Tagged union for node type.
     group: struct {
         expr: *RegexAST,
         capturing: bool,
-        id: usize,
-        group_type: enum {
-            regular,
-            lookahead,
-            lookbehind
-        },
+        id: ?usize,
+        group_type: RegexGroupType,
     },
     repetition: struct { // Parent node to another node constructed by a quantifier.
         child: *RegexAST,
         reps_min: usize,
         reps_max: usize,
-        possessive: bool,
+        rep_type: RegexRepeaterType,
     },
     class: struct { // Character class.
         items: []*RegexAST,
@@ -49,7 +60,45 @@ pub const RegexParsingError = error{
 
 pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*RegexAST {
     var i: usize = 0;
-    return parseRegexExpr(allocator, str_to_parse, &i);
+    var j: usize = 1; // ID 0 is reserved for whole match.
+    const ret = try parseRegexExpr(allocator, str_to_parse, &i);
+    try setGroupIDs(ret, &j);
+    return ret;
+}
+
+fn setGroupIDs(ast: *RegexAST, id: *usize) !void {
+    switch(ast.*) {
+        .group => |grp| { // set ID, increment, and then recurse for group.
+            if (grp.capturing) {
+                ast.group.id = id.*;
+                id.* += 1;
+            } else { // Non-capturing groups don't get group IDs.
+                ast.group.id = null;
+            }
+            try setGroupIDs(grp.expr, id);
+        }, // outside of group, just recurse.
+        .alternation => |alt| {
+            for (alt.parts) |item| {
+                try setGroupIDs(item, id);
+            }
+        },
+        .concatenation => |concat| {
+            for (concat.parts) |item| {
+                try setGroupIDs(item, id);
+            }
+        },
+        .class => |class| {
+            for (class.items) |item| {
+                try setGroupIDs(item, id);
+            }
+        },
+        .repetition => |rep| {
+            try setGroupIDs(rep.child, id);
+        },
+        else => {
+            return;
+        },
+    }
 }
 
 fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
@@ -165,12 +214,41 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
-        var result: *RegexAST = undefined;
-        if (false) {          // if lookahead peeked
-            result = undefined;               // parse lookahead here with special logic.
-        } else {
-            result = try allocator.create(RegexAST);
-            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = true, .id = 0, .group_type = .regular}};  // Parse expression within concat group.
+        const result: *RegexAST = try allocator.create(RegexAST);
+        if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
+            if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
+                i.* += 3; // consume ?<=
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .positive_lookbehind}};
+            } else if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '!') {
+                i.* += 3; // consume ?<!
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .negative_lookbehind}};
+            } else if (str_to_parse[i.* + 1] == '=') {
+                i.* += 2; // consume ?=
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .positive_lookahead}};
+            } else if (str_to_parse[i.* + 1] == '!') {
+                i.* += 2; // consume ?!
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .negative_lookahead}};
+            } else if (str_to_parse[i.* + 1] == ':') {
+                i.* += 2; // consume ?:
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .non_capturing}};
+            } else { // ? found but no matching flag.
+                return RegexParsingError.TokenNotFound;
+            }
+        } else if (i.* < str_to_parse.len - 1 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
+            if (str_to_parse[i.* + 1] == '=') {
+                i.* += 2; // consume ?=
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .positive_lookahead}};
+            } else if (str_to_parse[i.* + 1] == '!') {
+                i.* += 2; // consume ?!
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .negative_lookahead}};
+            } else if (str_to_parse[i.* + 1] == ':') {
+                i.* += 2; // consume ?:
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .non_capturing}};
+            } else { // ? found but no matching flag.
+                return RegexParsingError.TokenNotFound;
+            }
+        } else { // otherwise, do regular group.
+            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = true, .id = 0, .group_type = .regular}};
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
             return RegexParsingError.TokenNotFound;
@@ -303,13 +381,16 @@ fn checkQuantifiers(atom: *RegexAST, allocator: anytype, str_to_parse: []const u
             return atom;
         },
     }
-    var possessive: bool = false;
+    var rep_type: RegexRepeaterType = .greedy;
     if (i.* < str_to_parse.len and str_to_parse[i.*] == '+') {
-        possessive = true;
+        rep_type = .possessive;
         i.* += 1; // Consume the possessive +.
+    } else if (i.* < str_to_parse.len and str_to_parse[i.*] == '?') {
+        rep_type = .lazy;
+        i.* += 1; // Consume the lazy ?.
     }
     const atom_parent = try allocator.create(RegexAST); // Construct repetition node and wrap atom in it.
-    atom_parent.* = .{ .repetition = .{ .child = atom, .reps_min = count_min, .reps_max = count_max, .possessive = possessive } };
+    atom_parent.* = .{ .repetition = .{ .child = atom, .reps_min = count_min, .reps_max = count_max, .rep_type = rep_type } };
     return atom_parent;
 }
 
@@ -431,7 +512,7 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
             try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
         },
         .repetition => |rep| {
-            try out_interface.print("REPETITION(min = {}, max = {}, possessive = {})\n", .{ rep.reps_min, rep.reps_max, rep.possessive });
+            try out_interface.print("REPETITION(min = {}, max = {}, type = {s})\n", .{ rep.reps_min, rep.reps_max, @tagName(rep.rep_type) });
             try printRegexASTRecursive(out_interface, rep.child, recursionLevel + 1);
         },
         .alternation => |alt| {
@@ -441,7 +522,7 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
             }
         },
         .group => |grp| {
-            try out_interface.print("GROUP(capturing = {}, id = {}, type = {s})\n", .{grp.capturing, grp.id, @tagName(grp.group_type)});
+            try out_interface.print("GROUP(capturing = {}, id = {?}, type = {s})\n", .{grp.capturing, grp.id, @tagName(grp.group_type)});
             try printRegexASTRecursive(out_interface, grp.expr, recursionLevel + 1);
         },
         .concatenation => |concat| {
