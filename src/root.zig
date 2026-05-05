@@ -379,7 +379,7 @@ fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) !RegexLiteralType {
 
 fn isDefaultMetacharacter(character: u8) bool {
     switch (character) {
-        '$', '^', '.', '[', ']', '(', ')', '{', '}' => {
+        '$', '^', '.', '[', ']', '(', ')', '{', '}', '*', '+', '|', '?' => {
             return true;
         },
         else => {
