@@ -627,13 +627,13 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, 
                 try printRegexASTRecursive(out_interface, concat.parts[i], recursion_level + 1);
             }
         },
-        .class => |classItem| {
-            try out_interface.print("CLASS(negated = {})\n", .{classItem.negated});
-            for (0..classItem.items.len) |i| {
+        .class => |class_item| {
+            try out_interface.print("CLASS(negated = {})\n", .{class_item.negated});
+            for (0..class_item.items.len) |i| {
                 for (0..recursion_level+1) |_| {
                     try out_interface.print("\t", .{});
                 }
-                try printRegexLiteral(out_interface, classItem.items[i]);
+                try printRegexLiteral(out_interface, class_item.items[i]);
             }
         },
         .epsilon => {
@@ -663,8 +663,8 @@ pub fn destroyRegexPattern(allocator: anytype, pattern: RegexAST) !void {
         .repetition => |rep| {
             try destroyRegexPattern(allocator, rep.child);
         },
-        .class => |classItem| {
-            allocator.free(classItem.items);
+        .class => |class_item| {
+            allocator.free(class_item.items);
         },
         .epsilon => {
             return;
