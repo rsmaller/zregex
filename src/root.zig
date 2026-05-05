@@ -39,6 +39,8 @@ const RegexLiteralType = struct {
         digit: void,
         word: void,
         whitespace: void,
+        start_anchor: void,
+        end_anchor: void,
         range: struct { // For ranges within char classes. Cannot contain metacharacters.
             character_min: u8,
         character_max: u8,
@@ -58,7 +60,7 @@ const RegexASTInternal = union(enum) { // Tagged union for node type.
     group: struct {
         expr: *RegexASTInternal,
         id: ?usize,
-        group_type: RegexGroupType,
+        group_data: RegexGroupType,
     },
     repetition: struct { // Parent node to another node constructed by a quantifier.
         child: *RegexASTInternal,
@@ -91,7 +93,7 @@ pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*Rege
 fn setGroupIDs(ast: *RegexASTInternal, id: *usize) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
-            switch(grp.group_type) {
+            switch(grp.group_data) {
                 .capturing => {
                     ast.group.id = id.*;
                     id.* += 1;
@@ -127,20 +129,20 @@ fn setGroupIDs(ast: *RegexASTInternal, id: *usize) !void {
 fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
     var result = try allocator.create(RegexASTInternal);
-    var resultList = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
     defer {
-        resultList.deinit(allocator);
+        result_list.deinit(allocator);
     }
     errdefer {
-        for (resultList.items) |item| {
+        for (result_list.items) |item| {
             destroyRegexPattern(allocator, item) catch @panic("Cant free AST after error!");
         }
         allocator.destroy(result);
     }
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
-        try resultList.append(allocator, &EPSILON_UNIT);
+        try result_list.append(allocator, &EPSILON_UNIT);
     } else { // If not an epsilon, just parse the first alternation as a regular term.
-        try resultList.append(allocator, try parseRegexTerm(allocator, str_to_parse, i));
+        try result_list.append(allocator, try parseRegexTerm(allocator, str_to_parse, i));
     }
     while (i.* < str_to_parse.len and str_to_parse[i.*] == '|') { // Parse through pipes as arguments.
         i.* += 1;
@@ -148,17 +150,17 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             break;
         }
         if (str_to_parse[i.*] == ')') { // Handle epsilon as the last alternation argument.
-            try resultList.append(allocator, &EPSILON_UNIT);
+            try result_list.append(allocator, &EPSILON_UNIT);
             break;
         }
-        try resultList.append(allocator, try parseRegexTerm(allocator, str_to_parse, i)); // Handle generic terms in alternation not caught by edge cases.
+        try result_list.append(allocator, try parseRegexTerm(allocator, str_to_parse, i)); // Handle generic terms in alternation not caught by edge cases.
     }
-    const listSlice = try resultList.toOwnedSlice(allocator);
-    result.* = .{ .alternation = .{.parts = listSlice } }; // Start parsing alternations first, and assume 2 alternations minimum.
-    if (listSlice.len == 1) {
+    const list_slice = try result_list.toOwnedSlice(allocator);
+    result.* = .{ .alternation = .{.parts = list_slice } }; // Start parsing alternations first, and assume 2 alternations minimum.
+    if (list_slice.len == 1) {
         allocator.destroy(result);
-        result = listSlice[0];
-        allocator.free(listSlice);
+        result = list_slice[0];
+        allocator.free(list_slice);
     }
     return result;
 }
@@ -166,26 +168,26 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
 fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
     var result = try allocator.create(RegexASTInternal);
-    var resultList = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
     defer {
-        resultList.deinit(allocator);
+        result_list.deinit(allocator);
     }
     errdefer {
-        for (resultList.items) |item| {
+        for (result_list.items) |item| {
             destroyRegexPattern(allocator, item) catch @panic("Cant free AST after error!");
         }
         allocator.destroy(result);
     }
-    try resultList.append(allocator, try parseRegexFactor(allocator, str_to_parse, i));
+    try result_list.append(allocator, try parseRegexFactor(allocator, str_to_parse, i));
     while (i.* < str_to_parse.len and str_to_parse[i.*] != '|' and str_to_parse[i.*] != ')') { // If character pointed to is handled by expr or factor, break.
-        try resultList.append(allocator, try parseRegexFactor(allocator, str_to_parse, i));
+        try result_list.append(allocator, try parseRegexFactor(allocator, str_to_parse, i));
     }
-    const listSlice = try resultList.toOwnedSlice(allocator);
-    result.* = .{ .concatenation = .{.parts = listSlice} };
-    if (listSlice.len == 1) {
+    const list_slice = try result_list.toOwnedSlice(allocator);
+    result.* = .{ .concatenation = .{.parts = list_slice} };
+    if (list_slice.len == 1) {
         allocator.destroy(result);
-        result = listSlice[0];
-        allocator.free(listSlice);
+        result = list_slice[0];
+        allocator.free(list_slice);
     }
     return result;
 }
@@ -193,13 +195,13 @@ fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
 fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
     const result = try allocator.create(RegexASTInternal);
-    var resultList = try std.ArrayList(RegexLiteralType).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(RegexLiteralType).initCapacity(allocator, 1);
     var negated: bool = false;
     defer {
-        resultList.deinit(allocator);
+        result_list.deinit(allocator);
     }
     errdefer {
-        // for (resultList.items) |item| {
+        // for (result_list.items) |item| {
         //     destroyRegexPattern(allocator, item) catch @panic("Cant free AST after error!");
         // }
         allocator.destroy(result);
@@ -214,14 +216,14 @@ fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) 
     var item: RegexLiteralType = undefined;
     while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
         item = try fetchCharOrRangeInClass(str_to_parse, i); // Parse the first item in the class.
-        try resultList.append(allocator, item);
+        try result_list.append(allocator, item);
         i.* += 1;
     }
     if (i.* >= str_to_parse.len) {
         return RegexParsingError.EndOfString;
     }
-    const listSlice = try resultList.toOwnedSlice(allocator);
-    result.* = .{ .class = .{ .items = listSlice, .negated = negated } };
+    const list_slice = try result_list.toOwnedSlice(allocator);
+    result.* = .{ .class = .{ .items = list_slice, .negated = negated } };
     return result;
 }
 
@@ -233,22 +235,22 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .positive_lookbehind}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .positive_lookbehind}}};
             } else if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '!') {
                 i.* += 3; // consume ?<!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .negative_lookbehind}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .negative_lookbehind}}};
             } else if (str_to_parse[i.* + 1] == '=') {
                 i.* += 2; // consume ?=
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .positive_lookahead}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .positive_lookahead}}};
             } else if (str_to_parse[i.* + 1] == '!') {
                 i.* += 2; // consume ?!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .negative_lookahead}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .negative_lookahead}}};
             } else if (str_to_parse[i.* + 1] == ':') {
                 i.* += 2; // consume ?:
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .generic}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .generic}}};
             } else if (str_to_parse[i.* + 1] == '>') {
                 i.* += 2; // consume ?>
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .atomic}}}; // Atomic groups do not capture.
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .atomic}}}; // Atomic groups do not capture.
             } else { // ? found but no matching flag.
                 allocator.destroy(result);
                 return RegexParsingError.TokenNotFound;
@@ -256,22 +258,22 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         } else if (i.* < str_to_parse.len - 1 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
             if (str_to_parse[i.* + 1] == '=') {
                 i.* += 2; // consume ?=
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .positive_lookahead}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .positive_lookahead}}};
             } else if (str_to_parse[i.* + 1] == '!') {
                 i.* += 2; // consume ?!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .negative_lookahead}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .negative_lookahead}}};
             } else if (str_to_parse[i.* + 1] == ':') {
                 i.* += 2; // consume ?:
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .generic}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .generic}}};
             } else if (str_to_parse[i.* + 1] == '>') {
                 i.* += 2; // consume ?>
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .atomic}}}; // Atomic groups do not capture.
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.non_capturing = .atomic}}}; // Atomic groups do not capture.
             } else { // ? found but no matching flag.
                 allocator.destroy(result);
                 return RegexParsingError.TokenNotFound;
             }
         } else { // otherwise, do regular group.
-            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.capturing = .generic}}};
+            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_data = .{.capturing = .generic}}};
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
             allocator.destroy(result);
@@ -346,6 +348,12 @@ fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) RegexLiteralType {
                 },
                 'W' => {
                     return .{.literal = .word, .negated = true};
+                },
+                '^' => {
+                    return .{.literal = .start_anchor, .negated = false};
+                },
+                '$' => {
+                    return .{.literal = .end_anchor, .negated = false};
                 },
                 else => {
                     return .{.literal = .{.generic = char_to_set}, .negated = false};
@@ -602,13 +610,13 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, 
             }
         },
         .group => |grp| {
-            try out_interface.print("GROUP(id = {?}, type = {s}.", .{grp.id, @tagName(grp.group_type)});
-            switch(grp.group_type) {
+            try out_interface.print("GROUP(id = {?}, type = {s}.", .{grp.id, @tagName(grp.group_data)});
+            switch(grp.group_data) {
                 .capturing => {
-                    try out_interface.print("{s})\n", .{@tagName(grp.group_type.capturing)});
+                    try out_interface.print("{s})\n", .{@tagName(grp.group_data.capturing)});
                 },
                 .non_capturing => {
-                    try out_interface.print("{s})\n", .{@tagName(grp.group_type.non_capturing)});
+                    try out_interface.print("{s})\n", .{@tagName(grp.group_data.non_capturing)});
                 },
             }
             try printRegexASTRecursive(out_interface, grp.expr, recursion_level + 1);
