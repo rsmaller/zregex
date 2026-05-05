@@ -86,7 +86,13 @@ pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*Rege
     var i: usize = 0;
     var j: usize = 1; // ID 0 is reserved for whole match.
     const ret = try parseRegexExpr(allocator, str_to_parse, &i);
+    errdefer {
+        destroyRegexPattern(allocator, ret) catch @panic("Failed to free AST after error!");
+    }
     try setGroupIDs(ret, &j);
+    if (i != str_to_parse.len) {
+        return RegexParsingError.TokenNotFound;
+    }
     return ret;
 }
 
@@ -127,7 +133,6 @@ fn setGroupIDs(ast: *RegexASTInternal, id: *usize) !void {
 }
 
 fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
-    if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
     var result = try allocator.create(RegexASTInternal);
     var result_list = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
     defer {
@@ -139,6 +144,7 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         }
         allocator.destroy(result);
     }
+    if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString; // Error out after deferring.
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
         try result_list.append(allocator, &EPSILON_UNIT);
     } else { // If not an epsilon, just parse the first alternation as a regular term.
@@ -232,6 +238,9 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
         const result: *RegexASTInternal = try allocator.create(RegexASTInternal);
+        errdefer {
+            allocator.destroy(result);
+        }
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
@@ -281,18 +290,19 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         }
         i.* += 1; // consume ')'
         if (i.* < str_to_parse.len) { // Don't check quantifiers when ) is at the end of the string.
+                                      //
             return try checkQuantifiers(result, allocator, str_to_parse, i);
         } else {
             return result;
         }
     }
     var atom = try allocator.create(RegexASTInternal);
-    errdefer allocator.destroy(atom);
     var metacharacter: bool = undefined;
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
         i.* += 1; // Consume backslash.
         if (i.* >= str_to_parse.len) {
+            allocator.destroy(atom);
             return RegexParsingError.EndOfString;
         }
         escaped = true;
@@ -320,14 +330,14 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         i.* += 1; // Consume the '['.
         atom = try parseRegexCharClass(allocator, str_to_parse, i);
     } else {
-        atom.* = .{.literal = fetchCharLiteral(char_to_set, metacharacter)};
+        atom.* = .{.literal = fetchCharLiteral(char_to_set, metacharacter) catch |err| {allocator.destroy(atom); return err;}}; // Manually catch/free with erroring to prevent double-free.
     }
     i.* += 1; // Consume most recently used character, either the current token or the end of char class.
     if (i.* >= str_to_parse.len) return atom; // Only if at end of string, otherwise check for repetition.
-    return try checkQuantifiers(atom, allocator, str_to_parse, i);
+    return checkQuantifiers(atom, allocator, str_to_parse, i) catch |err| {allocator.destroy(atom); return err;};
 }
 
-fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) RegexLiteralType {
+fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) !RegexLiteralType {
     switch(metacharacter) {
         true => {
             switch(char_to_set) {
@@ -356,7 +366,8 @@ fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) RegexLiteralType {
                     return .{.literal = .end_anchor, .negated = false};
                 },
                 else => {
-                    return .{.literal = .{.generic = char_to_set}, .negated = false};
+                    return RegexParsingError.TokenNotFound;
+                    // return .{.literal = .{.generic = char_to_set}, .negated = false};
                 }
             }
         },
@@ -368,7 +379,7 @@ fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) RegexLiteralType {
 
 fn isDefaultMetacharacter(character: u8) bool {
     switch (character) {
-        '$', '^', '.', '[' => {
+        '$', '^', '.', '[', ']', '(', ')', '{', '}' => {
             return true;
         },
         else => {

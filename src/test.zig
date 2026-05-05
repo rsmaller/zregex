@@ -89,7 +89,7 @@ test "a" {
     try expectASTEqual(testAST, compiledPattern);
 }
 
-test "error" {
+test "unclosed_brace" {
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -99,4 +99,64 @@ test "error" {
     const pattern = "a{"; // Change this line to change the test.
 
     try std.testing.expectError(zregex.RegexParsingError.EndOfString, zregex.compileRegex(allocator, pattern));
+}
+
+test "unopened_brace" {
+    var dbg = std.heap.DebugAllocator(.{}){};
+    defer {
+        std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
+    }
+    const allocator = dbg.allocator();
+
+    const pattern = "a}"; // Change this line to change the test.
+
+    try std.testing.expectError(zregex.RegexParsingError.TokenNotFound, zregex.compileRegex(allocator, pattern));
+}
+
+test "unclosed_group" {
+    var dbg = std.heap.DebugAllocator(.{}){};
+    defer {
+        std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
+    }
+    const allocator = dbg.allocator();
+
+    const pattern = "a("; // Change this line to change the test.
+
+    try std.testing.expectError(zregex.RegexParsingError.EndOfString, zregex.compileRegex(allocator, pattern));
+}
+
+test "unopened_group" {
+    var dbg = std.heap.DebugAllocator(.{}){};
+    defer {
+        std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
+    }
+    const allocator = dbg.allocator();
+
+    const pattern = "a)"; // Change this line to change the test.
+
+    try std.testing.expectError(zregex.RegexParsingError.TokenNotFound, zregex.compileRegex(allocator, pattern));
+}
+
+test "unclosed_class" {
+    var dbg = std.heap.DebugAllocator(.{}){};
+    defer {
+        std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
+    }
+    const allocator = dbg.allocator();
+
+    const pattern = "a["; // Change this line to change the test.
+
+    try std.testing.expectError(zregex.RegexParsingError.EndOfString, zregex.compileRegex(allocator, pattern));
+}
+
+test "unopened_class" {
+    var dbg = std.heap.DebugAllocator(.{}){};
+    defer {
+        std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
+    }
+    const allocator = dbg.allocator();
+
+    const pattern = "a]"; // Change this line to change the test.
+
+    try std.testing.expectError(zregex.RegexParsingError.TokenNotFound, zregex.compileRegex(allocator, pattern));
 }
