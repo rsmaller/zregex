@@ -33,7 +33,7 @@ const RegexGroupType = union(enum) {
     },
 };
 
-const RegexLiteralType = struct {
+pub const RegexLiteralType = struct {
     literal: union(enum) {
         generic: u8,
         digit: void,
@@ -43,7 +43,7 @@ const RegexLiteralType = struct {
         end_anchor: void,
         range: struct { // For ranges within char classes. Cannot contain metacharacters.
             character_min: u8,
-        character_max: u8,
+            character_max: u8,
         },
     },
     negated: bool,

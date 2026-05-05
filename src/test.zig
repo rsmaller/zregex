@@ -1,16 +1,25 @@
 const std = @import("std");
 const zregex = @import("./root.zig");
 
-fn expectASTEqual(a: zregex.RegexPattern, b: zregex.RegexPattern) !void {
-    try std.testing.expect(@intFromEnum(a.*) == @intFromEnum(b.*));
-    switch (a.*) {
-        .literal => |lit| {
-            try std.testing.expect(lit.metacharacter == b.literal.metacharacter);
-            try std.testing.expect(lit.character == b.literal.character);
+fn expectLiteralEqual(a: zregex.RegexLiteralType, b: zregex.RegexLiteralType) !void {
+    switch (a.literal) {
+        .generic => |chr| {
+            try std.testing.expect(chr == b.literal.generic);
         },
         .range => |range| {
-            try std.testing.expect(range.character_min == b.range.character_min);
-            try std.testing.expect(range.character_max == b.range.character_max);
+            try std.testing.expect(range.character_min == b.literal.range.character_min);
+            try std.testing.expect(range.character_max == b.literal.range.character_max);
+        },
+        else => {},
+    }
+    try std.testing.expect(a.negated == b.negated);
+}
+
+fn expectASTEqual(a: zregex.RegexAST, b: zregex.RegexAST) !void {
+    try std.testing.expect(@intFromEnum(a.*) == @intFromEnum(b.*));
+    switch (a.*) {
+        .literal => {
+            try expectLiteralEqual(a.literal, b.literal);
         },
         .alternation => |alt| {
             try std.testing.expect(alt.parts.len == b.alternation.parts.len);
@@ -26,19 +35,32 @@ fn expectASTEqual(a: zregex.RegexPattern, b: zregex.RegexPattern) !void {
         },
         .group => |grp| {
             try std.testing.expect(grp.id == b.group.id);
-            try std.testing.expect(grp.capturing == b.group.capturing);
-            try std.testing.expect(grp.group_type == b.group.group_type);
+            try std.testing.expect(@intFromEnum(grp.group_data) == @intFromEnum(b.group.group_data));
+            switch(grp.group_data) {
+                .capturing => |capt| {
+                    try std.testing.expect(@intFromEnum(capt) == @intFromEnum(b.group.group_data.capturing));
+                },
+                .non_capturing => |non_capt| {
+                    try std.testing.expect(@intFromEnum(non_capt) == @intFromEnum(b.group.group_data.non_capturing));
+                }
+            }
             try expectASTEqual(grp.expr, b.group.expr);
         },
         .repetition => |rep| {
-            try std.testing.expect(rep.reps_min == b.repetition.reps_min);
-            try std.testing.expect(rep.reps_max == b.repetition.reps_max);
+            try std.testing.expect(rep.reps.min == b.repetition.reps.min);
+            try std.testing.expect(@intFromEnum(rep.reps.max) == @intFromEnum(b.repetition.reps.max));
+            switch(rep.reps.max) {
+                .bounded => |bound| {
+                    try std.testing.expect(bound == b.repetition.reps.max.bounded);
+                },
+                .unbounded => {},
+            }
             try expectASTEqual(rep.child, b.repetition.child);
         },
         .class => |classItem| {
             try std.testing.expect(classItem.negated == b.class.negated);
             for (classItem.items, 0..) |_, i| {
-                try expectASTEqual(classItem.items[i], b.class.items[i]);
+                try expectLiteralEqual(classItem.items[i], b.class.items[i]);
             }
         },
         .epsilon => {}, // Epsilons contain no data and are always the same.
@@ -57,8 +79,11 @@ test "a" {
     const compiledPattern = try zregex.compileRegex(allocator, pattern);
     defer zregex.destroyRegexPattern(allocator, compiledPattern) catch @panic("Could not free pattern!");
 
-    const testAST: zregex.RegexPattern = &.{
-        .literal = .{.character = 'a', .metacharacter = false},
+    const testAST: zregex.RegexAST = &.{
+        .literal = .{
+            .literal = .{.generic = 'a'},
+            .negated = false,
+        },
     };
 
     try expectASTEqual(testAST, compiledPattern);
