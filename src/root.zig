@@ -156,7 +156,7 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         try result_list.append(allocator, try parseRegexTerm(allocator, str_to_parse, i)); // Handle generic terms in alternation not caught by edge cases.
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
-    result.* = .{ .alternation = .{.parts = list_slice } }; // Start parsing alternations first, and assume 2 alternations minimum.
+    result.* = .{.alternation = .{.parts = list_slice}}; // Start parsing alternations first, and assume 2 alternations minimum.
     if (list_slice.len == 1) {
         allocator.destroy(result);
         result = list_slice[0];
@@ -183,7 +183,7 @@ fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         try result_list.append(allocator, try parseRegexFactor(allocator, str_to_parse, i));
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
-    result.* = .{ .concatenation = .{.parts = list_slice} };
+    result.* = .{.concatenation = .{.parts = list_slice}};
     if (list_slice.len == 1) {
         allocator.destroy(result);
         result = list_slice[0];
@@ -223,7 +223,7 @@ fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) 
         return RegexParsingError.EndOfString;
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
-    result.* = .{ .class = .{ .items = list_slice, .negated = negated } };
+    result.* = .{.class = .{.items = list_slice, .negated = negated}};
     return result;
 }
 
@@ -320,7 +320,7 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         i.* += 1; // Consume the '['.
         atom = try parseRegexCharClass(allocator, str_to_parse, i);
     } else {
-        atom.* = .{ .literal = fetchCharLiteral(char_to_set, metacharacter)};
+        atom.* = .{.literal = fetchCharLiteral(char_to_set, metacharacter)};
     }
     i.* += 1; // Consume most recently used character, either the current token or the end of char class.
     if (i.* >= str_to_parse.len) return atom; // Only if at end of string, otherwise check for repetition.
@@ -454,7 +454,7 @@ fn checkQuantifiers(atom: *RegexASTInternal, allocator: anytype, str_to_parse: [
         i.* += 1; // Consume the lazy ?.
     }
     const atom_parent = try allocator.create(RegexASTInternal); // Construct repetition node and wrap atom in it.
-    atom_parent.* = .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } };
+    atom_parent.* = .{.repetition = .{.child = atom, .reps = repetition_container, .rep_type = rep_type}};
     return atom_parent;
 }
 
@@ -519,9 +519,9 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLi
         if (char_to_set >= char_to_set2) {
             return RegexParsingError.InvalidRange;
         }
-        return .{.literal = .{ .range = .{ .character_min = char_to_set, .character_max = char_to_set2 } }, .negated = false}; // If range is found, make range node.
+        return .{.literal = .{.range = .{.character_min = char_to_set, .character_max = char_to_set2}}, .negated = false}; // If range is found, make range node.
     }
-    return .{.literal = .{ .generic = char_to_set}, .negated = false}; // If range is found, make range node.
+    return .{.literal = .{.generic = char_to_set}, .negated = false}; // If range is found, make range node.
 }
 
 pub fn printRegexAST(out_interface: anytype, ast: RegexAST) !void {
@@ -545,7 +545,7 @@ fn printRegexLiteral(out_interface: anytype, lit: RegexLiteralType) !void {
                 buf[0] = gen_lit;
                 buf[1] = 0;
             }
-            try out_interface.print("LITERAL(char = {s})\n", .{ buf });
+            try out_interface.print("LITERAL(char = {s})\n", .{buf});
         },
         .range => |range| {
             var buf: [2]u8 = undefined;
@@ -595,10 +595,10 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, 
         .repetition => |rep| {
             switch (rep.reps.max) {
                 .bounded => {
-                    try out_interface.print("REPETITION(min = {}, max = {}, type = {s})\n", .{ rep.reps.min, rep.reps.max.bounded, @tagName(rep.rep_type) });
+                    try out_interface.print("REPETITION(min = {}, max = {}, type = {s})\n", .{rep.reps.min, rep.reps.max.bounded, @tagName(rep.rep_type)});
                 },
                 .unbounded => {
-                    try out_interface.print("REPETITION(min = {}, max = inf, type = {s})\n", .{ rep.reps.min, @tagName(rep.rep_type) });
+                    try out_interface.print("REPETITION(min = {}, max = inf, type = {s})\n", .{rep.reps.min, @tagName(rep.rep_type)});
                 },
             }
             try printRegexASTRecursive(out_interface, rep.child, recursion_level + 1);
