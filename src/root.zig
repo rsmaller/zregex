@@ -9,13 +9,28 @@ const RegexRepeaterType = enum {
     possessive,
 };
 
-const RegexGroupType = enum {
-    regular,
-    positive_lookahead,
-    positive_lookbehind,
-    negative_lookahead,
-    negative_lookbehind,
-    non_capturing,
+const RegexBoundType = union(enum) {
+    bounded: usize,
+    unbounded: void,
+};
+
+const RegexRepetitionRangeType = struct {
+    min: usize,
+    max: RegexBoundType,
+};
+
+const RegexGroupType = union(enum) {
+    capturing: enum {
+        generic,
+    },
+    non_capturing: enum {
+        generic,
+        atomic,
+        positive_lookahead,
+        positive_lookbehind,
+        negative_lookahead,
+        negative_lookbehind,
+    },
 };
 
 const RegexAST = union(enum) { // Tagged union for node type.
@@ -35,14 +50,14 @@ const RegexAST = union(enum) { // Tagged union for node type.
     }, // Same as concatenation but semantically different and in a higher order function.
     group: struct {
         expr: *RegexAST,
-        capturing: bool,
         id: ?usize,
         group_type: RegexGroupType,
     },
     repetition: struct { // Parent node to another node constructed by a quantifier.
         child: *RegexAST,
-        reps_min: usize,
-        reps_max: usize,
+        // reps_min: usize,
+        // reps_max: usize,
+        reps: RegexRepetitionRangeType,
         rep_type: RegexRepeaterType,
     },
     class: struct { // Character class.
@@ -53,6 +68,8 @@ const RegexAST = union(enum) { // Tagged union for node type.
 };
 
 var EPSILON_UNIT: RegexAST = .epsilon; // Generic epsilon copy used everywhere; contains no data.
+
+const REGEX_INF = std.math.maxInt(usize) - 1; // Set to USIZE_MAX - 1 to prevent overflows.
 
 pub const RegexParsingError = error{
     TokenNotFound,
@@ -71,11 +88,14 @@ pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*Rege
 fn setGroupIDs(ast: *RegexAST, id: *usize) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
-            if (grp.capturing) {
-                ast.group.id = id.*;
-                id.* += 1;
-            } else { // Non-capturing groups don't get group IDs.
-                ast.group.id = null;
+            switch(grp.group_type) {
+                .capturing => {
+                    ast.group.id = id.*;
+                    id.* += 1;
+                },
+                .non_capturing => {
+                    ast.group.id = null;
+                }
             }
             try setGroupIDs(grp.expr, id);
         }, // outside of group, just recurse.
@@ -190,10 +210,7 @@ fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) 
             return RegexParsingError.EndOfString;
         }
     }
-    var item = try allocator.create(RegexAST);
-    item.* = try fetchCharOrRange(str_to_parse, i); // Parse the first item in the class.
-    try resultList.append(allocator, item);
-    i.* += 1; // Be careful if new code is added here, could cause underflow with i.* - 1.
+    var item: *RegexAST = undefined;
     while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
         item = try allocator.create(RegexAST);
         item.* = try fetchCharOrRange(str_to_parse, i); // Parse the first item in the class.
@@ -216,39 +233,48 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .positive_lookbehind}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .positive_lookbehind}}};
             } else if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '!') {
                 i.* += 3; // consume ?<!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .negative_lookbehind}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .negative_lookbehind}}};
             } else if (str_to_parse[i.* + 1] == '=') {
                 i.* += 2; // consume ?=
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .positive_lookahead}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .positive_lookahead}}};
             } else if (str_to_parse[i.* + 1] == '!') {
                 i.* += 2; // consume ?!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .negative_lookahead}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .negative_lookahead}}};
             } else if (str_to_parse[i.* + 1] == ':') {
                 i.* += 2; // consume ?:
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .non_capturing}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .generic}}};
+            } else if (str_to_parse[i.* + 1] == '>') {
+                i.* += 2; // consume ?>
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .atomic}}}; // Atomic groups do not capture.
             } else { // ? found but no matching flag.
+                allocator.destroy(result);
                 return RegexParsingError.TokenNotFound;
             }
         } else if (i.* < str_to_parse.len - 1 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
             if (str_to_parse[i.* + 1] == '=') {
                 i.* += 2; // consume ?=
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .positive_lookahead}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .positive_lookahead}}};
             } else if (str_to_parse[i.* + 1] == '!') {
                 i.* += 2; // consume ?!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .negative_lookahead}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .negative_lookahead}}};
             } else if (str_to_parse[i.* + 1] == ':') {
                 i.* += 2; // consume ?:
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = false, .id = 0, .group_type = .non_capturing}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .generic}}};
+            } else if (str_to_parse[i.* + 1] == '>') {
+                i.* += 2; // consume ?>
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.non_capturing = .atomic}}}; // Atomic groups do not capture.
             } else { // ? found but no matching flag.
+                allocator.destroy(result);
                 return RegexParsingError.TokenNotFound;
             }
         } else { // otherwise, do regular group.
-            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .capturing = true, .id = 0, .group_type = .regular}};
+            result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .id = 0, .group_type = .{.capturing = .generic}}};
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
+            allocator.destroy(result);
             return RegexParsingError.TokenNotFound;
         }
         i.* += 1; // consume ')'
@@ -322,25 +348,23 @@ fn isEscapedMetacharacter(character: u8) bool {
 }
 
 fn checkQuantifiers(atom: *RegexAST, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
-    var count_min: usize = 0;
-    var count_max: usize = 0;
+    var count_min: usize = undefined;
+    var count_max: RegexBoundType = undefined;
     if (i.* >= str_to_parse.len) {
         return RegexParsingError.EndOfString;
     }
+    var repetition_container: RegexRepetitionRangeType = undefined;
     switch (str_to_parse[i.*]) {
         '*' => {
-            count_min = 0;
-            count_max = std.math.maxInt(usize);
+            repetition_container = .{.min = 0, .max = .unbounded};
             i.* += 1;
         },
         '+' => {
-            count_min = 1;
-            count_max = std.math.maxInt(usize);
+            repetition_container = .{.min = 1, .max = .unbounded};
             i.* += 1;
         },
         '?' => {
-            count_min = 0;
-            count_max = 1;
+            repetition_container = .{.min = 0, .max = .{.bounded = 1}};
             i.* += 1;
         },
         '{' => { // Permissive parsing on {,}
@@ -356,23 +380,24 @@ fn checkQuantifiers(atom: *RegexAST, allocator: anytype, str_to_parse: []const u
                 i.* = num_slice_index_min; // Set i to what was caught by integer conversion.
             }
             if (str_to_parse[i.*] != ',') { // If comma is not encountered, it is one number so min and max should be the same.
-                count_max = count_min;
+                count_max = .{.bounded = count_min};
             } else {
                 i.* += 1;
                 if (i.* >= str_to_parse.len) {
                     return RegexParsingError.EndOfString;
                 }
                 if (str_to_parse[i.*] == '}') { // If comma is encountered but no ending number is foumd, then max is the largest possible int.
-                    count_max = std.math.maxInt(usize);
+                    count_max = .unbounded;
                 } else {
                     const num_slice_index_max = i.* + (std.mem.indexOfNone(u8, str_to_parse[i.*..], "0123456789") orelse str_to_parse.len - i.*); // Same arithmetic as with min.
-                    count_max = try std.fmt.parseUnsigned(usize, str_to_parse[i.*..num_slice_index_max], 10);
+                    count_max = .{.bounded = try std.fmt.parseUnsigned(usize, str_to_parse[i.*..num_slice_index_max], 10)};
                     i.* = num_slice_index_max;
                 }
             }
             if (i.* >= str_to_parse.len or str_to_parse[i.*] != '}') {
                 return RegexParsingError.TokenNotFound;
             }
+            repetition_container = .{.min = count_min, .max = count_max};
             i.* += 1;
         },
         else => { // If no quantifier is found, do not wrap in repetition.
@@ -388,7 +413,7 @@ fn checkQuantifiers(atom: *RegexAST, allocator: anytype, str_to_parse: []const u
         i.* += 1; // Consume the lazy ?.
     }
     const atom_parent = try allocator.create(RegexAST); // Construct repetition node and wrap atom in it.
-    atom_parent.* = .{ .repetition = .{ .child = atom, .reps_min = count_min, .reps_max = count_max, .rep_type = rep_type } };
+    atom_parent.* = .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } };
     return atom_parent;
 }
 
@@ -510,7 +535,14 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
             try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
         },
         .repetition => |rep| {
-            try out_interface.print("REPETITION(min = {}, max = {}, type = {s})\n", .{ rep.reps_min, rep.reps_max, @tagName(rep.rep_type) });
+            switch (rep.reps.max) {
+                .bounded => {
+                    try out_interface.print("REPETITION(min = {}, max = {}, type = {s})\n", .{ rep.reps.min, rep.reps.max.bounded, @tagName(rep.rep_type) });
+                },
+                .unbounded => {
+                    try out_interface.print("REPETITION(min = {}, max = inf, type = {s})\n", .{ rep.reps.min, @tagName(rep.rep_type) });
+                },
+            }
             try printRegexASTRecursive(out_interface, rep.child, recursionLevel + 1);
         },
         .alternation => |alt| {
@@ -520,7 +552,15 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
             }
         },
         .group => |grp| {
-            try out_interface.print("GROUP(capturing = {}, id = {?}, type = {s})\n", .{grp.capturing, grp.id, @tagName(grp.group_type)});
+            try out_interface.print("GROUP(id = {?}, type = {s}.", .{grp.id, @tagName(grp.group_type)});
+            switch(grp.group_type) {
+                .capturing => {
+                    try out_interface.print("{s})\n", .{@tagName(grp.group_type.capturing)});
+                },
+                .non_capturing => {
+                    try out_interface.print("{s})\n", .{@tagName(grp.group_type.non_capturing)});
+                },
+            }
             try printRegexASTRecursive(out_interface, grp.expr, recursionLevel + 1);
         },
         .concatenation => |concat| {
