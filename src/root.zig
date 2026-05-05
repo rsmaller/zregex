@@ -1,7 +1,7 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 
-pub const RegexPattern = *const RegexAST;
+pub const RegexAST = *const RegexASTInternal;
 
 const RegexRepeaterType = enum {
     greedy,
@@ -33,43 +33,46 @@ const RegexGroupType = union(enum) {
     },
 };
 
-const RegexAST = union(enum) { // Tagged union for node type.
-    literal: struct { // Generic single characters.
-        metacharacter: bool,
-        character: u8,
-    },
-    range: struct { // For ranges within char classes. Cannot contain metacharacters.
-        character_min: u8,
+const RegexLiteralType = struct {
+    literal: union(enum) {
+        generic: u8,
+        digit: void,
+        word: void,
+        whitespace: void,
+        range: struct { // For ranges within char classes. Cannot contain metacharacters.
+            character_min: u8,
         character_max: u8,
+        },
     },
+    negated: bool,
+};
+
+const RegexASTInternal = union(enum) { // Tagged union for node type.
+    literal: RegexLiteralType,
     concatenation: struct {
-        parts: []*RegexAST, // Operation chaining two characters together.
+        parts: []*RegexASTInternal, // Operation chaining two characters together.
     },
     alternation: struct{
-        parts: []*RegexAST,
+        parts: []*RegexASTInternal,
     }, // Same as concatenation but semantically different and in a higher order function.
     group: struct {
-        expr: *RegexAST,
+        expr: *RegexASTInternal,
         id: ?usize,
         group_type: RegexGroupType,
     },
     repetition: struct { // Parent node to another node constructed by a quantifier.
-        child: *RegexAST,
-        // reps_min: usize,
-        // reps_max: usize,
+        child: *RegexASTInternal,
         reps: RegexRepetitionRangeType,
         rep_type: RegexRepeaterType,
     },
     class: struct { // Character class.
-        items: []*RegexAST,
+        items: []RegexLiteralType,
         negated: bool,
     },
     epsilon: void, // Generic empty node.
 };
 
-var EPSILON_UNIT: RegexAST = .epsilon; // Generic epsilon copy used everywhere; contains no data.
-
-const REGEX_INF = std.math.maxInt(usize) - 1; // Set to USIZE_MAX - 1 to prevent overflows.
+var EPSILON_UNIT: RegexASTInternal = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
 pub const RegexParsingError = error{
     TokenNotFound,
@@ -77,7 +80,7 @@ pub const RegexParsingError = error{
     InvalidRange,
 };
 
-pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*RegexAST {
+pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*RegexASTInternal {
     var i: usize = 0;
     var j: usize = 1; // ID 0 is reserved for whole match.
     const ret = try parseRegexExpr(allocator, str_to_parse, &i);
@@ -85,7 +88,7 @@ pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*Rege
     return ret;
 }
 
-fn setGroupIDs(ast: *RegexAST, id: *usize) !void {
+fn setGroupIDs(ast: *RegexASTInternal, id: *usize) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             switch(grp.group_type) {
@@ -109,13 +112,11 @@ fn setGroupIDs(ast: *RegexAST, id: *usize) !void {
                 try setGroupIDs(item, id);
             }
         },
-        .class => |class| {
-            for (class.items) |item| {
-                try setGroupIDs(item, id);
-            }
-        },
         .repetition => |rep| {
             try setGroupIDs(rep.child, id);
+        },
+        .class => {
+            return;
         },
         else => {
             return;
@@ -123,10 +124,10 @@ fn setGroupIDs(ast: *RegexAST, id: *usize) !void {
     }
 }
 
-fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
+fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
-    var result = try allocator.create(RegexAST);
-    var resultList = try std.ArrayList(*RegexAST).initCapacity(allocator, 1);
+    var result = try allocator.create(RegexASTInternal);
+    var resultList = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
     defer {
         resultList.deinit(allocator);
     }
@@ -162,10 +163,10 @@ fn parseRegexExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     return result;
 }
 
-fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
+fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
-    var result = try allocator.create(RegexAST);
-    var resultList = try std.ArrayList(*RegexAST).initCapacity(allocator, 1);
+    var result = try allocator.create(RegexASTInternal);
+    var resultList = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
     defer {
         resultList.deinit(allocator);
     }
@@ -189,18 +190,18 @@ fn parseRegexTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     return result;
 }
 
-fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
+fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
-    const result = try allocator.create(RegexAST);
-    var resultList = try std.ArrayList(*RegexAST).initCapacity(allocator, 1);
+    const result = try allocator.create(RegexASTInternal);
+    var resultList = try std.ArrayList(RegexLiteralType).initCapacity(allocator, 1);
     var negated: bool = false;
     defer {
         resultList.deinit(allocator);
     }
     errdefer {
-        for (resultList.items) |item| {
-            destroyRegexPattern(allocator, item) catch @panic("Cant free AST after error!");
-        }
+        // for (resultList.items) |item| {
+        //     destroyRegexPattern(allocator, item) catch @panic("Cant free AST after error!");
+        // }
         allocator.destroy(result);
     }
     if (str_to_parse[i.*] == '^') { // handle ^ negation edge case for first part char class.
@@ -210,10 +211,9 @@ fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) 
             return RegexParsingError.EndOfString;
         }
     }
-    var item: *RegexAST = undefined;
+    var item: RegexLiteralType = undefined;
     while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
-        item = try allocator.create(RegexAST);
-        item.* = try fetchCharOrRange(str_to_parse, i); // Parse the first item in the class.
+        item = try fetchCharOrRangeInClass(str_to_parse, i); // Parse the first item in the class.
         try resultList.append(allocator, item);
         i.* += 1;
     }
@@ -225,11 +225,11 @@ fn parseRegexCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) 
     return result;
 }
 
-fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
+fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     if (i.* >= str_to_parse.len) return RegexParsingError.EndOfString;
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
-        const result: *RegexAST = try allocator.create(RegexAST);
+        const result: *RegexASTInternal = try allocator.create(RegexASTInternal);
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
@@ -284,7 +284,7 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
             return result;
         }
     }
-    var atom = try allocator.create(RegexAST);
+    var atom = try allocator.create(RegexASTInternal);
     errdefer allocator.destroy(atom);
     var metacharacter: bool = undefined;
     var escaped: bool = false;
@@ -298,31 +298,64 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
     } else {
         metacharacter = isDefaultMetacharacter(str_to_parse[i.*]);
     }
-    var charToSet: u8 = str_to_parse[i.*]; // Grab character and set value based on escape sequence.
+    var char_to_set: u8 = str_to_parse[i.*]; // Grab character and set value based on escape sequence.
     if (escaped) {
         switch (str_to_parse[i.*]) {
             'n' => {
-                charToSet = '\n';
+                char_to_set = '\n';
             },
             't' => {
-                charToSet = '\t';
+                char_to_set = '\t';
             },
             'r' => {
-                charToSet = '\r';
+                char_to_set = '\r';
             },
             else => {},
         }
     }
-    if (charToSet == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
+    if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
         allocator.destroy(atom);
         i.* += 1; // Consume the '['.
         atom = try parseRegexCharClass(allocator, str_to_parse, i);
     } else {
-        atom.* = .{ .literal = .{ .character = charToSet, .metacharacter = metacharacter } };
+        atom.* = .{ .literal = fetchCharLiteral(char_to_set, metacharacter)};
     }
     i.* += 1; // Consume most recently used character, either the current token or the end of char class.
     if (i.* >= str_to_parse.len) return atom; // Only if at end of string, otherwise check for repetition.
     return try checkQuantifiers(atom, allocator, str_to_parse, i);
+}
+
+fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) RegexLiteralType {
+    switch(metacharacter) {
+        true => {
+            switch(char_to_set) {
+                'd' => {
+                    return .{.literal = .digit, .negated = false};
+                },
+                'D' => {
+                    return .{.literal = .digit, .negated = true};
+                },
+                's' => {
+                    return .{.literal = .whitespace, .negated = false};
+                },
+                'S' => {
+                    return .{.literal = .whitespace, .negated = true};
+                },
+                'w' => {
+                    return .{.literal = .word, .negated = false};
+                },
+                'W' => {
+                    return .{.literal = .word, .negated = true};
+                },
+                else => {
+                    return .{.literal = .{.generic = char_to_set}, .negated = false};
+                }
+            }
+        },
+        false => {
+            return .{.literal = .{.generic = char_to_set}, .negated = false};
+        }
+    }
 }
 
 fn isDefaultMetacharacter(character: u8) bool {
@@ -347,7 +380,7 @@ fn isEscapedMetacharacter(character: u8) bool {
     }
 }
 
-fn checkQuantifiers(atom: *RegexAST, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexAST {
+fn checkQuantifiers(atom: *RegexASTInternal, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     var count_min: usize = undefined;
     var count_max: RegexBoundType = undefined;
     if (i.* >= str_to_parse.len) {
@@ -412,12 +445,12 @@ fn checkQuantifiers(atom: *RegexAST, allocator: anytype, str_to_parse: []const u
         rep_type = .lazy;
         i.* += 1; // Consume the lazy ?.
     }
-    const atom_parent = try allocator.create(RegexAST); // Construct repetition node and wrap atom in it.
+    const atom_parent = try allocator.create(RegexASTInternal); // Construct repetition node and wrap atom in it.
     atom_parent.* = .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } };
     return atom_parent;
 }
 
-fn fetchCharOrRange(str_to_parse: []const u8, i: *usize) anyerror!RegexAST { // For use in character class compilation to tokenize with '-' syntax awareness.
+fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLiteralType { // For use in character class compilation to tokenize with '-' syntax awareness.
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') {
         i.* += 1; // Consume backslash.
@@ -426,19 +459,22 @@ fn fetchCharOrRange(str_to_parse: []const u8, i: *usize) anyerror!RegexAST { // 
         }
         escaped = true;
     }
-    var charToSet: u8 = str_to_parse[i.*];
+    var char_to_set: u8 = str_to_parse[i.*];
     if (escaped) {
         switch (str_to_parse[i.*]) {
             'n' => {
-                charToSet = '\n';
+                char_to_set = '\n';
             },
             't' => {
-                charToSet = '\t';
+                char_to_set = '\t';
             },
             'r' => {
-                charToSet = '\r';
+                char_to_set = '\r';
             },
-            else => {},
+            ']' => {},
+            else => {
+                return RegexParsingError.TokenNotFound;
+            },
         }
     }
     escaped = false;
@@ -454,54 +490,54 @@ fn fetchCharOrRange(str_to_parse: []const u8, i: *usize) anyerror!RegexAST { // 
             }
             escaped = true;
         }
-        var charToSet2: u8 = str_to_parse[i.*]; // Grab character after -.
+        var char_to_set2: u8 = str_to_parse[i.*]; // Grab character after -.
         if (escaped) {
             switch (str_to_parse[i.*]) {
                 'n' => {
-                    charToSet2 = '\n';
+                    char_to_set2 = '\n';
                 },
                 't' => {
-                    charToSet2 = '\t';
+                    char_to_set2 = '\t';
                 },
                 'r' => {
-                    charToSet2 = '\r';
+                    char_to_set2 = '\r';
                 },
-                else => {},
+                ']' => {},
+                else => {
+                    return RegexParsingError.TokenNotFound;
+                },
             }
         }
-        if (charToSet >= charToSet2) {
+        if (char_to_set >= char_to_set2) {
             return RegexParsingError.InvalidRange;
         }
-        return .{ .range = .{ .character_min = charToSet, .character_max = charToSet2 } }; // If range is found, make range node.
+        return .{.literal = .{ .range = .{ .character_min = char_to_set, .character_max = char_to_set2 } }, .negated = false}; // If range is found, make range node.
     }
-    return .{ .literal = .{ .character = charToSet, .metacharacter = false } }; // If range is not found, make a literal node.
+    return .{.literal = .{ .generic = char_to_set}, .negated = false}; // If range is found, make range node.
 }
 
-pub fn printRegexAST(out_interface: anytype, ast: RegexPattern) !void {
+pub fn printRegexAST(out_interface: anytype, ast: RegexAST) !void {
     try printRegexASTRecursive(out_interface, ast, 0);
 }
 
-fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursionLevel: usize) !void {
-    for (0..recursionLevel) |_| {
-        try out_interface.print("\t", .{});
-    }
-    switch (ast.*) {
-        .literal => |lit| {
+fn printRegexLiteral(out_interface: anytype, lit: RegexLiteralType) !void {
+    switch(lit.literal) {
+        .generic => |gen_lit| {
             var buf: [2]u8 = undefined;
-            if (lit.character == '\n') {
+            if (gen_lit == '\n') {
                 buf[0] = '\\';
                 buf[1] = 'n';
-            } else if (lit.character == '\t') {
+            } else if (gen_lit == '\t') {
                 buf[0] = '\\';
                 buf[1] = 't';
-            } else if (lit.character == '\r') {
+            } else if (gen_lit == '\r') {
                 buf[0] = '\\';
                 buf[1] = 'r';
             } else {
-                buf[0] = lit.character;
+                buf[0] = gen_lit;
                 buf[1] = 0;
             }
-            try out_interface.print("LITERAL(char = {s}, metachar = {})\n", .{ buf, lit.metacharacter });
+            try out_interface.print("LITERAL(char = {s})\n", .{ buf });
         },
         .range => |range| {
             var buf: [2]u8 = undefined;
@@ -532,7 +568,21 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
                 buf2[0] = range.character_max;
                 buf2[1] = 0;
             }
-            try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
+            try out_interface.print("RANGE(min = {s}, max = {s})\n", .{buf, buf2});
+        },
+        else => {
+            try out_interface.print("LITERAL(char = {s})\n", .{@tagName(lit.literal)});
+        },
+    }
+}
+
+fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, recursion_level: usize) !void {
+    for (0..recursion_level) |_| {
+        try out_interface.print("\t", .{});
+    }
+    switch (ast.*) {
+        .literal => |lit| {
+            try printRegexLiteral(out_interface, lit);
         },
         .repetition => |rep| {
             switch (rep.reps.max) {
@@ -543,12 +593,12 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
                     try out_interface.print("REPETITION(min = {}, max = inf, type = {s})\n", .{ rep.reps.min, @tagName(rep.rep_type) });
                 },
             }
-            try printRegexASTRecursive(out_interface, rep.child, recursionLevel + 1);
+            try printRegexASTRecursive(out_interface, rep.child, recursion_level + 1);
         },
         .alternation => |alt| {
             try out_interface.print("ALTERNATION()\n", .{});
             for (0..alt.parts.len) |i| {
-                try printRegexASTRecursive(out_interface, alt.parts[i], recursionLevel + 1);
+                try printRegexASTRecursive(out_interface, alt.parts[i], recursion_level + 1);
             }
         },
         .group => |grp| {
@@ -561,18 +611,21 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
                     try out_interface.print("{s})\n", .{@tagName(grp.group_type.non_capturing)});
                 },
             }
-            try printRegexASTRecursive(out_interface, grp.expr, recursionLevel + 1);
+            try printRegexASTRecursive(out_interface, grp.expr, recursion_level + 1);
         },
         .concatenation => |concat| {
             try out_interface.print("CONCATENATION()\n", .{});
             for (0..concat.parts.len) |i| {
-                try printRegexASTRecursive(out_interface, concat.parts[i], recursionLevel + 1);
+                try printRegexASTRecursive(out_interface, concat.parts[i], recursion_level + 1);
             }
         },
         .class => |classItem| {
             try out_interface.print("CLASS(negated = {})\n", .{classItem.negated});
             for (0..classItem.items.len) |i| {
-                try printRegexASTRecursive(out_interface, classItem.items[i], recursionLevel + 1);
+                for (0..recursion_level+1) |_| {
+                    try out_interface.print("\t", .{});
+                }
+                try printRegexLiteral(out_interface, classItem.items[i]);
             }
         },
         .epsilon => {
@@ -581,10 +634,9 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexAST, recursio
     }
 }
 
-pub fn destroyRegexPattern(allocator: anytype, pattern: RegexPattern) !void {
+pub fn destroyRegexPattern(allocator: anytype, pattern: RegexAST) !void {
     switch (pattern.*) {
         .literal => {},
-        .range => {},
         .alternation => |alt| {
             for (alt.parts) |item| {
                 try destroyRegexPattern(allocator, item);
@@ -604,9 +656,6 @@ pub fn destroyRegexPattern(allocator: anytype, pattern: RegexPattern) !void {
             try destroyRegexPattern(allocator, rep.child);
         },
         .class => |classItem| {
-            for (classItem.items) |item| {
-                try destroyRegexPattern(allocator, item);
-            }
             allocator.free(classItem.items);
         },
         .epsilon => {
