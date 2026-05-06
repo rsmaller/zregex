@@ -38,9 +38,11 @@ pub const RegexLiteralType = struct {
         generic: u8,
         digit: void,
         word: void,
+        word_boundary: void,
         whitespace: void,
         start_anchor: void,
         end_anchor: void,
+        any: void,
         range: struct { // For ranges within char classes. Cannot contain metacharacters.
             character_min: u8,
             character_max: u8,
@@ -359,15 +361,26 @@ fn fetchCharLiteral(char_to_set: u8, metacharacter: bool) !RegexLiteralType {
                 'W' => {
                     return .{.literal = .word, .negated = true};
                 },
+                'b' => {
+                    return .{.literal = .word_boundary, .negated = false};
+                },
+                'B' => {
+                    return .{.literal = .word_boundary, .negated = true};
+                },
                 '^' => {
                     return .{.literal = .start_anchor, .negated = false};
                 },
                 '$' => {
                     return .{.literal = .end_anchor, .negated = false};
                 },
-                else => {
+                '.' => {
+                    return .{.literal = .any, .negated = false};
+                },
+                '(', ')', '[', ']', '{', '}', '|' => {
                     return RegexParsingError.TokenNotFound;
-                    // return .{.literal = .{.generic = char_to_set}, .negated = false};
+                },
+                else => {
+                    return .{.literal = .{.generic = char_to_set}, .negated = false};
                 }
             }
         },
@@ -399,6 +412,33 @@ fn isEscapedMetacharacter(character: u8) bool {
     }
 }
 
+fn assertRepetitionAllowance(atom: *RegexASTInternal,) !void {
+    switch (atom.*) { // Validate that node is allowed to be repeated.
+        .group => |grp| {
+            switch(grp.group_data) {
+                .non_capturing => {
+                    return RegexParsingError.TokenNotFound;
+                },
+                else => {},
+            }
+        },
+        .epsilon, .repetition, => {
+            return RegexParsingError.TokenNotFound;
+        },
+        .literal => |lit| {
+            switch(lit.literal) {
+                .end_anchor, .start_anchor, .word_boundary => {
+                    return RegexParsingError.TokenNotFound;
+                },
+                else => {},
+            }
+        },
+        else => {
+
+        },
+    }
+}
+
 fn checkQuantifiers(atom: *RegexASTInternal, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*RegexASTInternal {
     var count_min: usize = undefined;
     var count_max: RegexBoundType = undefined;
@@ -408,18 +448,22 @@ fn checkQuantifiers(atom: *RegexASTInternal, allocator: anytype, str_to_parse: [
     var repetition_container: RegexRepetitionRangeType = undefined;
     switch (str_to_parse[i.*]) {
         '*' => {
+            try assertRepetitionAllowance(atom);
             repetition_container = .{.min = 0, .max = .unbounded};
             i.* += 1;
         },
         '+' => {
+            try assertRepetitionAllowance(atom);
             repetition_container = .{.min = 1, .max = .unbounded};
             i.* += 1;
         },
         '?' => {
+            try assertRepetitionAllowance(atom);
             repetition_container = .{.min = 0, .max = .{.bounded = 1}};
             i.* += 1;
         },
         '{' => { // Permissive parsing on {,}
+            try assertRepetitionAllowance(atom);
             i.* += 1; // Skip past curly brace.
             if (i.* >= str_to_parse.len) {
                 return RegexParsingError.EndOfString;
@@ -490,10 +534,58 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLi
             'r' => {
                 char_to_set = '\r';
             },
-            ']' => {},
-            else => {
+            ']' => {
+
+            },
+            'd' => {
+                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                    return RegexParsingError.TokenNotFound;
+                }
+                return .{.literal = .digit, .negated = false};
+            },
+            'D' => {
+                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                    return RegexParsingError.TokenNotFound;
+                }
+                return .{.literal = .digit, .negated = true};
+            },
+            'w' => {
+                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                    return RegexParsingError.TokenNotFound;
+                }
+                return .{.literal = .word, .negated = false};
+            },
+            'W' => {
+                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                    return RegexParsingError.TokenNotFound;
+                }
+                return .{.literal = .word, .negated = true};
+            },
+            's' => {
+                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                    return RegexParsingError.TokenNotFound;
+                }
+                return .{.literal = .whitespace, .negated = false};
+            },
+            'S' => {
+                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                    return RegexParsingError.TokenNotFound;
+                }
+                return .{.literal = .whitespace, .negated = true};
+            },
+            'b', 'B' => { // Not allowed at all in char classes.
                 return RegexParsingError.TokenNotFound;
             },
+            else => {
+                // leave it alone
+            },
+        }
+    } else {
+        switch(char_to_set) {
+            '$', '^', '(' => {
+                return RegexParsingError.TokenNotFound;
+            },
+            else => {},
         }
     }
     escaped = false;
@@ -522,9 +614,19 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLi
                     char_to_set2 = '\r';
                 },
                 ']' => {},
-                else => {
+                'b', 'B', 'd', 'D', 's', 'S', 'w', 'W' => { // Characters not allowed in ranges or at all.
                     return RegexParsingError.TokenNotFound;
                 },
+                else => {
+
+                },
+            }
+        } else {
+            switch(char_to_set) {
+                '$', '^', '(' => {
+                    return RegexParsingError.TokenNotFound;
+                },
+                else => {},
             }
         }
         if (char_to_set >= char_to_set2) {
@@ -590,7 +692,7 @@ fn printRegexLiteral(out_interface: anytype, lit: RegexLiteralType) !void {
             try out_interface.print("RANGE(min = {s}, max = {s})\n", .{buf, buf2});
         },
         else => {
-            try out_interface.print("LITERAL(char = {s})\n", .{@tagName(lit.literal)});
+            try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{@tagName(lit.literal), lit.negated});
         },
     }
 }
