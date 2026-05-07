@@ -68,6 +68,7 @@ fn expectASTEqual(a: zregex.RegexAST, b: zregex.RegexAST) !void {
 }
 
 test "a" {
+    std.debug.print("Running test a\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -90,6 +91,7 @@ test "a" {
 }
 
 test "unclosed_brace" {
+    std.debug.print("Running test unclosed_brace\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -102,6 +104,7 @@ test "unclosed_brace" {
 }
 
 test "unopened_brace" {
+    std.debug.print("Running test unopened_brace\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -114,6 +117,7 @@ test "unopened_brace" {
 }
 
 test "unclosed_group" {
+    std.debug.print("Running test unclosed_group\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -126,6 +130,7 @@ test "unclosed_group" {
 }
 
 test "unopened_group" {
+    std.debug.print("Running test unopened_group\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -138,6 +143,7 @@ test "unopened_group" {
 }
 
 test "unclosed_class" {
+    std.debug.print("Running test unclosed_class\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
@@ -150,6 +156,7 @@ test "unclosed_class" {
 }
 
 test "unopened_class" {
+    std.debug.print("Running test unopened_class\n", .{});
     var dbg = std.heap.DebugAllocator(.{}){};
     defer {
         std.testing.expect(dbg.deinit() == .ok) catch @panic("Leak found!");
