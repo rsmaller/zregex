@@ -535,7 +535,6 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLi
                 char_to_set = '\r';
             },
             ']' => {
-
             },
             'd' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
@@ -590,6 +589,9 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLi
     }
     escaped = false;
     if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') { // Range syntax.
+        if (i.* < str_to_parse.len - 2 and str_to_parse[i.* + 2] == ']') { // Return so that '-' is interpreted as a character at the end.
+            return .{.literal = .{.generic = char_to_set}, .negated = false};
+        }
         i.* += 2; // Skip past current item and -.
         if (i.* >= str_to_parse.len) {
             return RegexParsingError.EndOfString;
@@ -613,12 +615,12 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLi
                 'r' => {
                     char_to_set2 = '\r';
                 },
-                ']' => {},
+                ']' => {
+                },
                 'b', 'B', 'd', 'D', 's', 'S', 'w', 'W' => { // Characters not allowed in ranges or at all.
                     return RegexParsingError.TokenNotFound;
                 },
                 else => {
-
                 },
             }
         } else {
