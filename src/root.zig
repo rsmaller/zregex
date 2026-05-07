@@ -76,13 +76,120 @@ const RegexASTInternal = union(enum) { // Tagged union for node type.
     epsilon: void, // Generic empty node.
 };
 
-var EPSILON_UNIT: RegexASTInternal = .epsilon; // Generic epsilon copy used everywhere; contains no data.
-
 pub const RegexParsingError = error{
     TokenNotFound,
     EndOfString,
     InvalidRange,
 };
+
+var EPSILON_UNIT: RegexASTInternal = .epsilon; // Generic epsilon copy used everywhere; contains no data.
+
+fn literalIsEqual(a: RegexLiteralType, b: RegexLiteralType) bool {
+    switch (a.literal) {
+        .generic => |chr| {
+            if (chr != b.literal.generic) {
+                return false;
+            }
+        },
+        .range => |range| {
+            if (range.character_min != b.literal.range.character_min) {
+                return false;
+            }
+            if (range.character_max != b.literal.range.character_max) {
+                return false;
+            }
+        },
+        else => {},
+    }
+    return a.negated == b.negated;
+}
+
+pub fn ASTIsEqual(a: RegexAST, b: RegexAST) bool {
+    if (@intFromEnum(a.*) != @intFromEnum(b.*)) {
+        return false;
+    }
+    switch (a.*) {
+        .literal => {
+            if (!literalIsEqual(a.literal, b.literal)) {
+                return false;
+            }
+        },
+        .alternation => |alt| {
+            if (alt.parts.len != b.alternation.parts.len) {
+                return false;
+            }
+            for (alt.parts, 0..) |_, i| {
+                if (!ASTIsEqual(alt.parts[i], b.alternation.parts[i])) {
+                    return false;
+                }
+            }
+        },
+        .concatenation => |concat| {
+            if (concat.parts.len != b.concatenation.parts.len) {
+                return false;
+            }
+            for (concat.parts, 0..) |_, i| {
+                if (!ASTIsEqual(concat.parts[i], b.concatenation.parts[i])) {
+                    return false;
+                }
+            }
+        },
+        .group => |grp| {
+            if (grp.id != b.group.id) {
+                return false;
+            }
+            if (@intFromEnum(grp.group_data) != @intFromEnum(b.group.group_data)) {
+                return false;
+            }
+            switch(grp.group_data) {
+                .capturing => |capt| {
+                    if (@intFromEnum(capt) != @intFromEnum(b.group.group_data.capturing)) {
+                        return false;
+                    }
+                },
+                .non_capturing => |non_capt| {
+                    if (@intFromEnum(non_capt) != @intFromEnum(b.group.group_data.non_capturing)) {
+                        return false;
+                    }
+                }
+            }
+            if (!ASTIsEqual(grp.expr, b.group.expr)) {
+                return false;
+            }
+        },
+        .repetition => |rep| {
+            if (rep.reps.min != b.repetition.reps.min) {
+                return false;
+            }
+            if (@intFromEnum(rep.reps.max) != @intFromEnum(b.repetition.reps.max)) {
+                return false;
+            }
+            switch(rep.reps.max) {
+                .bounded => |bound| {
+                    if (bound != b.repetition.reps.max.bounded) {
+                        return false;
+                    }
+                },
+                .unbounded => {},
+            }
+            if (!ASTIsEqual(rep.child, b.repetition.child)) {
+                return false;
+            }
+        },
+        .class => |classItem| {
+            if (classItem.negated != b.class.negated) {
+                return false;
+            }
+            for (classItem.items, 0..) |_, i| {
+                if (!literalIsEqual(classItem.items[i], b.class.items[i])) {
+                    return false;
+                }
+            }
+        },
+        .epsilon => {}, // Epsilons contain no data and are always the same.
+    }
+    return true;
+}
 
 pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*RegexASTInternal {
     var i: usize = 0;
