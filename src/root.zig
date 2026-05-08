@@ -198,10 +198,11 @@ pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!*Rege
     errdefer {
         destroyRegexPattern(allocator, ret) catch @panic("Failed to free AST after error!");
     }
-    try setGroupIDs(ret, &j);
     if (i != str_to_parse.len) {
         return RegexParsingError.TokenNotFound;
     }
+    try setGroupIDs(ret, &j);
+    try trimAST(ret, allocator);
     return ret;
 }
 
@@ -231,6 +232,58 @@ fn setGroupIDs(ast: *RegexASTInternal, id: *usize) !void {
         },
         .repetition => |rep| {
             try setGroupIDs(rep.child, id);
+        },
+        .class => {
+            return;
+        },
+        else => {
+            return;
+        },
+    }
+}
+
+fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
+    switch(ast.*) {
+        .group => |grp| { // set ID, increment, and then recurse for group.
+            switch(grp.group_data) {
+                .capturing => {
+
+                },
+                .non_capturing => {
+
+                }
+            }
+            try trimAST(grp.expr, allocator);
+        }, // outside of group, just recurse.
+        .alternation => |alt| {
+            var list = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
+            var freed = try allocator.alloc(bool, ast.alternation.parts.len);
+            defer allocator.free(freed);
+            @memset(freed, false);
+            for (alt.parts, 0..) |item, i| {
+                if (!freed[i]) {
+                    try list.append(allocator, item);
+                }
+                for (i+1..alt.parts.len) |j| {
+                    if (ASTIsEqual(alt.parts[i], alt.parts[j])) {
+                        freed[j] = true;
+                        try destroyRegexPattern(allocator, alt.parts[j]);
+                    }
+                }
+            }
+            allocator.free(ast.alternation.parts);
+            ast.alternation.parts = try list.toOwnedSlice(allocator);
+            for (ast.alternation.parts) |item| {
+                try trimAST(item, allocator); // recurse after trimming.
+            }
+        },
+        .concatenation => |concat| {
+            for (concat.parts) |item| {
+                try trimAST(item, allocator);
+            }
+        },
+        .repetition => |rep| {
+            try trimAST(rep.child, allocator);
         },
         .class => {
             return;
