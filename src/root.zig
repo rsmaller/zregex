@@ -261,9 +261,8 @@ fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
             defer allocator.free(freed);
             @memset(freed, false);
             for (alt.parts, 0..) |item, i| {
-                if (!freed[i]) {
-                    try list.append(allocator, item);
-                }
+                if (freed[i]) continue;
+                try list.append(allocator, item);
                 for (i+1..alt.parts.len) |j| {
                     if (ASTIsEqual(alt.parts[i], alt.parts[j])) {
                         freed[j] = true;
@@ -642,7 +641,7 @@ fn checkQuantifiers(atom: *RegexASTInternal, allocator: anytype, str_to_parse: [
                 if (i.* >= str_to_parse.len) {
                     return RegexParsingError.EndOfString;
                 }
-                if (str_to_parse[i.*] == '}') { // If comma is encountered but no ending number is foumd, then max is the largest possible int.
+                if (str_to_parse[i.*] == '}') { // If comma is encountered but no ending number is found, then max is the largest possible int.
                     count_max = .unbounded;
                 } else {
                     const num_slice_index_max = i.* + (std.mem.indexOfNone(u8, str_to_parse[i.*..], "0123456789") orelse str_to_parse.len - i.*); // Same arithmetic as with min.
