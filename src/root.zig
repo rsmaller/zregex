@@ -338,7 +338,7 @@ fn alternationBound(a: RegexRepetitionRangeType, b: RegexRepetitionRangeType) Re
     }
 }
 
-fn match_requirement_range(ast: *const RegexASTInternal) RegexRepetitionRangeType {
+fn match_requirement_range(ast: *const RegexASTInternal) RegexRepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
     var result = RegexRepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
