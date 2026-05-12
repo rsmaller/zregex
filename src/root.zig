@@ -90,6 +90,7 @@ pub const RegexParsingError = error{
     TokenNotFound,
     EndOfString,
     InvalidRange,
+    VariableLookbehindRange,
 };
 
 var EPSILON_UNIT: RegexASTInternal = .epsilon; // Generic epsilon copy used everywhere; contains no data.
@@ -255,6 +256,129 @@ fn setGroupIDs(ast: *RegexASTInternal, id: *usize) !void {
     }
 }
 
+fn isEqualBound(a: RegexRepetitionRangeType, b: RegexRepetitionRangeType) bool {
+    if (@intFromEnum(a.max) != @intFromEnum(b.max)) return false;
+    switch(a.max) {
+        .bounded => {
+            return (a.min == b.min) and (a.max.bounded == b.max.bounded);
+        },
+        .unbounded => {
+            return a.min == b.min;
+        },
+    }
+}
+
+fn addBound(a: RegexRepetitionRangeType, b: RegexRepetitionRangeType) RegexRepetitionRangeType {
+    var result = a;
+    result.min += b.min;
+    switch(a.max) {
+        .unbounded => {
+            return result;
+        },
+        else => {
+            switch(b.max) {
+                .unbounded => {
+                    result.max = .unbounded;
+                    return result;
+                },
+                .bounded => {
+                    result.max.bounded += b.max.bounded;
+                    return result;
+                }
+            }
+        }
+    }
+}
+
+fn timesBound(a: RegexRepetitionRangeType, b: RegexRepetitionRangeType) RegexRepetitionRangeType {
+    var result = a;
+    result.min *= b.min;
+    switch(a.max) {
+        .unbounded => {
+            return result;
+        },
+        else => {
+            switch(b.max) {
+                .unbounded => {
+                    result.max = .unbounded;
+                    return result;
+                },
+                else => {
+                    result.max.bounded *= b.max.bounded;
+                    return result;
+                }
+            }
+        }
+    }
+}
+
+fn alternationBound(a: RegexRepetitionRangeType, b: RegexRepetitionRangeType) RegexRepetitionRangeType {
+    var result = a;
+    if (a.min > b.min) {
+        result.min = b.min;
+    }
+    switch(a.max) {
+        .unbounded => {
+            return result;
+        },
+        else => {
+            switch(b.max) {
+                .unbounded => {
+                    result.max = .unbounded;
+                    return result;
+                },
+                else => {
+                    if (a.max.bounded < b.max.bounded) {
+                        result.max.bounded = b.max.bounded;
+                    }
+                    return result;
+                }
+            }
+        }
+    }
+}
+
+fn match_requirement_range(ast: *const RegexASTInternal) RegexRepetitionRangeType {
+    var result = RegexRepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
+    switch(ast.*) {
+        .group => |grp| { // set ID, increment, and then recurse for group.
+            return match_requirement_range(grp.expr);
+        }, // outside of group, just recurse.
+        .alternation => |alt| {
+            result = match_requirement_range(alt.parts[0]);
+            for (alt.parts[1..]) |item| {
+                result = alternationBound(result, match_requirement_range(item));
+            }
+            return result;
+        },
+        .concatenation => |concat| {
+            for (concat.parts) |item| {
+                result = addBound(result, match_requirement_range(item));
+            }
+            return result;
+        },
+        .repetition => |rep| {
+            return timesBound(rep.reps, match_requirement_range(rep.child));
+        },
+        .class => {
+            return RegexRepetitionRangeType{.min = 1, .max = .{.bounded = 1}};
+        },
+        .leaf_atom => |leaf| {
+            switch(leaf.leaf_atom) {
+                .word_boundary, .start_anchor, .end_anchor => {
+                    return RegexRepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
+                },
+                else => {
+                    return RegexRepetitionRangeType{.min = 1, .max = .{.bounded = 1}};
+                }
+            }
+        },
+        .epsilon => {
+            return RegexRepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
+        }
+    }
+}
+
 fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
@@ -270,6 +394,27 @@ fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
                             },
                             else => {},
                         }
+                    }
+                }
+            }
+            switch(grp.group_data.type) {
+                .capturing => {},
+                .non_capturing => |non_capt| {
+                    switch(non_capt) {
+                        .lookbehind => {
+                            const len = match_requirement_range(grp.expr);
+                            switch(len.max) {
+                                .unbounded => {
+                                    return RegexParsingError.VariableLookbehindRange;
+                                },
+                                .bounded => {
+                                    if (len.max.bounded != len.min) {
+                                        return RegexParsingError.VariableLookbehindRange;
+                                    }
+                                }
+                            }
+                        },
+                        else => {},
                     }
                 }
             }
@@ -443,7 +588,7 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
                 result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .name = null, .id = 0, .group_data = .{.type = .{.non_capturing = .lookahead}, .negated = false}}};
             } else if (str_to_parse[i.* + 1] == '!') {
                 i.* += 2; // consume ?!
-                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .name = null, .id = 0, .group_data = .{.type = .{.non_capturing = .lookbehind}, .negated = true}}};
+                result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .name = null, .id = 0, .group_data = .{.type = .{.non_capturing = .lookahead}, .negated = true}}};
             } else if (str_to_parse[i.* + 1] == ':') {
                 i.* += 2; // consume ?:
                 result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .name = null, .id = 0, .group_data = .{.type = .{.non_capturing = .generic}, .negated = false}}};
@@ -827,9 +972,9 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLe
     return .{.leaf_atom = .{.generic = char_to_set}, .inverted = false}; // If range is found, make range node.
 }
 
-pub fn printRegexAST(out_interface: anytype, pattern: RegexPattern) !void {
+pub fn printRegexAST(out_interface: anytype, pattern: RegexPattern, show_match_width: bool) !void {
     if (pattern.ast) |ast| {
-        try printRegexASTRecursive(out_interface, ast, 0);
+        try printRegexASTRecursive(out_interface, ast, show_match_width, 0);
     }
 }
 
@@ -889,9 +1034,20 @@ fn printRegexLeafAtom(out_interface: anytype, leaf: RegexLeafAtomType) !void {
     }
 }
 
-fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, recursion_level: usize) !void {
+fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, show_match_width: bool, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
+    }
+    const len: RegexRepetitionRangeType = match_requirement_range(ast);
+    if (show_match_width) {
+        switch (len.max) {
+            .bounded => {
+                try out_interface.print("[Requisite match width is {d} - {d}] ", .{len.min, len.max.bounded});
+            },
+            .unbounded => {
+                try out_interface.print("[Requisite match width is {d} - inf] ", .{len.min});
+            },
+        }
     }
     switch (ast.*) {
         .leaf_atom => |leaf| {
@@ -906,12 +1062,12 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, 
                     try out_interface.print("REPETITION(min = {}, max = inf, type = {s})\n", .{rep.reps.min, @tagName(rep.rep_type)});
                 },
             }
-            try printRegexASTRecursive(out_interface, rep.child, recursion_level + 1);
+            try printRegexASTRecursive(out_interface, rep.child, show_match_width, recursion_level + 1);
         },
         .alternation => |alt| {
             try out_interface.print("ALTERNATION()\n", .{});
             for (0..alt.parts.len) |i| {
-                try printRegexASTRecursive(out_interface, alt.parts[i], recursion_level + 1);
+                try printRegexASTRecursive(out_interface, alt.parts[i], show_match_width, recursion_level + 1);
             }
         },
         .group => |grp| {
@@ -925,12 +1081,12 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, 
                 },
             }
             try out_interface.print("negated = {})\n", .{grp.group_data.negated});
-            try printRegexASTRecursive(out_interface, grp.expr, recursion_level + 1);
+            try printRegexASTRecursive(out_interface, grp.expr, show_match_width, recursion_level + 1);
         },
         .concatenation => |concat| {
             try out_interface.print("CONCATENATION()\n", .{});
             for (0..concat.parts.len) |i| {
-                try printRegexASTRecursive(out_interface, concat.parts[i], recursion_level + 1);
+                try printRegexASTRecursive(out_interface, concat.parts[i], show_match_width, recursion_level + 1);
             }
         },
         .class => |class_item| {
