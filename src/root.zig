@@ -58,6 +58,25 @@ pub const RegexLeafAtomType = struct {
         },
     },
     inverted: bool,
+    fn equals(self: *const RegexLeafAtomType, other: RegexLeafAtomType) bool {
+        switch (self.leaf_atom) {
+            .generic => |chr| {
+                if (chr != other.leaf_atom.generic) {
+                    return false;
+                }
+            },
+            .range => |range| {
+                if (range.character_min != other.leaf_atom.range.character_min) {
+                    return false;
+                }
+                if (range.character_max != other.leaf_atom.range.character_max) {
+                    return false;
+                }
+            },
+            else => {},
+        }
+        return self.inverted == other.inverted;
+    }
 };
 
 const RegexASTInternal = union(enum) { // Tagged union for node type.
@@ -95,33 +114,13 @@ pub const RegexParsingError = error{
 
 var EPSILON_UNIT: RegexASTInternal = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
-fn leaf_atomIsEqual(a: RegexLeafAtomType, b: RegexLeafAtomType) bool {
-    switch (a.leaf_atom) {
-        .generic => |chr| {
-            if (chr != b.leaf_atom.generic) {
-                return false;
-            }
-        },
-        .range => |range| {
-            if (range.character_min != b.leaf_atom.range.character_min) {
-                return false;
-            }
-            if (range.character_max != b.leaf_atom.range.character_max) {
-                return false;
-            }
-        },
-        else => {},
-    }
-    return a.inverted == b.inverted;
-}
-
 pub fn ASTIsEqual(a: RegexAST, b: RegexAST) bool {
     if (@intFromEnum(a.*) != @intFromEnum(b.*)) {
         return false;
     }
     switch (a.*) {
         .leaf_atom => {
-            if (!leaf_atomIsEqual(a.leaf_atom, b.leaf_atom)) {
+            if (!a.leaf_atom.equals(b.leaf_atom)) {
                 return false;
             }
         },
@@ -195,7 +194,7 @@ pub fn ASTIsEqual(a: RegexAST, b: RegexAST) bool {
                 return false;
             }
             for (classItem.items, 0..) |_, i| {
-                if (!leaf_atomIsEqual(classItem.items[i], b.class.items[i])) {
+                if (!classItem.items[i].equals(b.class.items[i])) {
                     return false;
                 }
             }
@@ -208,7 +207,7 @@ pub fn ASTIsEqual(a: RegexAST, b: RegexAST) bool {
 pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!RegexPattern {
     var i: usize = 0;
     var j: usize = 1; // ID 0 is reserved for whole match.
-    const ast = try parseRegexExpr(allocator, str_to_parse, &i);
+    const ast = if (str_to_parse.len > 0) (try parseRegexExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
     errdefer {
         destroyRegexAST(allocator, ast) catch @panic("Failed to free AST after error!");
     }
@@ -338,27 +337,27 @@ fn alternationBound(a: RegexRepetitionRangeType, b: RegexRepetitionRangeType) Re
     }
 }
 
-fn match_requirement_range(ast: *const RegexASTInternal) RegexRepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
+fn matchRequirementRange(ast: *const RegexASTInternal) RegexRepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
     var result = RegexRepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
-            return match_requirement_range(grp.expr);
+            return matchRequirementRange(grp.expr);
         }, // outside of group, just recurse.
         .alternation => |alt| {
-            result = match_requirement_range(alt.parts[0]);
+            result = matchRequirementRange(alt.parts[0]);
             for (alt.parts[1..]) |item| {
-                result = alternationBound(result, match_requirement_range(item));
+                result = alternationBound(result, matchRequirementRange(item));
             }
             return result;
         },
         .concatenation => |concat| {
             for (concat.parts) |item| {
-                result = addBound(result, match_requirement_range(item));
+                result = addBound(result, matchRequirementRange(item));
             }
             return result;
         },
         .repetition => |rep| {
-            return timesBound(rep.reps, match_requirement_range(rep.child));
+            return timesBound(rep.reps, matchRequirementRange(rep.child));
         },
         .class => {
             return RegexRepetitionRangeType{.min = 1, .max = .{.bounded = 1}};
@@ -377,6 +376,69 @@ fn match_requirement_range(ast: *const RegexASTInternal) RegexRepetitionRangeTyp
             return RegexRepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
         }
     }
+}
+
+// Makes a copy of an array without duplicates, in-order. Assumes that pointer elements in array are heap-allocated and single-pointers.
+fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
+    const T = @TypeOf(arr[0]);
+    var list = try std.ArrayList(T).initCapacity(allocator, 1);
+    var freed = try allocator.alloc(bool, arr.len);
+    defer allocator.free(freed);
+    @memset(freed, false);
+    for (arr, 0..) |item, i| {
+        if (freed[i]) continue;
+        try list.append(allocator, item);
+        for (i+1..arr.len) |j| {
+            switch(@typeInfo(T)) {
+                .pointer => |ptr| {
+                    switch(@typeInfo(ptr.child)) {
+                        .@"struct" => {
+                            if(arr[i].*.equals(arr[j].*)) {
+                                freed[j] = true;
+                                try allocator.free(arr[j]);
+                            }
+                        },
+                        .@"union" => {
+                            switch(ptr.child) {
+                                RegexASTInternal => {
+                                    if (ASTIsEqual(arr[i], arr[j])) {
+                                        freed[j] = true;
+                                        try destroyRegexAST(allocator, arr[j]);
+                                    }
+                                },
+                                else => {
+                                    @compileError("Non-comparable type passed to remove duplicates function: " ++ @typeName(T));
+                                }
+                            }
+                        },
+                        .int, .float, .bool, .comptime_int, .comptime_float, .@"enum", .error_set => {
+                            if (arr[i].* == arr[j].*) {
+                                freed[j] = true;
+                                try allocator.free(arr[j]);
+                            }
+                        },
+                        else => {
+                            @compileError("Non-comparable type passed to remove duplicates function: " ++ @typeName(T));
+                        }
+                    }
+                },
+                .@"struct" => {
+                    if(arr[i].equals(arr[j])) {
+                        freed[j] = true;
+                    }
+                },
+                .int, .float, .bool, .comptime_int, .comptime_float, .@"enum", .error_set => {
+                    if (arr[i] == arr[j]) {
+                        freed[j] = true;
+                    }
+                },
+                else => { // Unions should only be handled when they are RegexAST unions.
+                    @compileError("Non-comparable type passed to remove duplicates function: " ++ @typeName(T));
+                }
+            }
+        }
+    }
+    return try list.toOwnedSlice(allocator);
 }
 
 fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
@@ -402,7 +464,7 @@ fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
                 .non_capturing => |non_capt| {
                     switch(non_capt) {
                         .lookbehind => {
-                            const len = match_requirement_range(grp.expr);
+                            const len = matchRequirementRange(grp.expr);
                             switch(len.max) {
                                 .unbounded => {
                                     return RegexParsingError.VariableLookbehindRange;
@@ -420,23 +482,10 @@ fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
             }
             try trimAST(grp.expr, allocator);
         }, // outside of group, just recurse.
-        .alternation => |alt| {
-            var list = try std.ArrayList(*RegexASTInternal).initCapacity(allocator, 1);
-            var freed = try allocator.alloc(bool, ast.alternation.parts.len);
-            defer allocator.free(freed);
-            @memset(freed, false);
-            for (alt.parts, 0..) |item, i| {
-                if (freed[i]) continue;
-                try list.append(allocator, item);
-                for (i+1..alt.parts.len) |j| {
-                    if (ASTIsEqual(alt.parts[i], alt.parts[j])) {
-                        freed[j] = true;
-                        try destroyRegexAST(allocator, alt.parts[j]);
-                    }
-                }
-            }
-            allocator.free(ast.alternation.parts);
-            ast.alternation.parts = try list.toOwnedSlice(allocator);
+        .alternation => {
+            const old_alt_parts = ast.alternation.parts;
+            ast.alternation.parts = try removeDuplicates(allocator, ast.alternation.parts);
+            allocator.free(old_alt_parts);
             for (ast.alternation.parts) |item| {
                 try trimAST(item, allocator); // recurse after trimming.
             }
@@ -450,7 +499,9 @@ fn trimAST(ast: *RegexASTInternal, allocator: anytype) !void {
             try trimAST(rep.child, allocator);
         },
         .class => {
-            return;
+            const old_cls_items = ast.class.items;
+            ast.class.items = try removeDuplicates(allocator, ast.class.items);
+            allocator.free(old_cls_items);
         },
         else => {
             return;
@@ -912,13 +963,13 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLe
                 // leave it alone
             },
         }
-    } else {
-        switch(char_to_set) {
-            '$', '^', '(' => {
-                return RegexParsingError.TokenNotFound;
-            },
-            else => {},
-        }
+    } else { // Bad edge case; here for later use if needed for refinement.
+        // switch(char_to_set) {
+        //     '$', '^', '(' => {
+        //         return RegexParsingError.TokenNotFound;
+        //     },
+        //     else => {},
+        // }
     }
     escaped = false;
     if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') { // Range syntax.
@@ -1038,7 +1089,7 @@ fn printRegexASTRecursive(out_interface: anytype, ast: *const RegexASTInternal, 
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
-    const len: RegexRepetitionRangeType = match_requirement_range(ast);
+    const len: RegexRepetitionRangeType = matchRequirementRange(ast);
     if (show_match_width) {
         switch (len.max) {
             .bounded => {
