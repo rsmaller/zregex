@@ -15,13 +15,13 @@ test "a" {
     defer zregex.destroyRegexPattern(allocator, compiledPattern) catch @panic("Could not free pattern!");
 
     const testAST: zregex.RegexAST = &.{
-        .literal = .{
-            .literal = .{.generic = 'a'},
-            .negated = false,
+        .leaf_atom = .{
+            .leaf_atom = .{.generic = 'a'},
+            .inverted = false,
         },
     };
 
-    try std.testing.expect(zregex.ASTIsEqual(testAST, compiledPattern) == true);
+    try std.testing.expect(testAST.equals(compiledPattern.ast.?) == true);
 }
 
 test "unclosed_brace" {

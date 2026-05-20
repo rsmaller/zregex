@@ -40,6 +40,27 @@ const RegexGroupType = struct {
         }
     },
     negated: bool,
+    pub fn equals(self: *const RegexGroupType, b: RegexGroupType) bool {
+        if (@intFromEnum(self.type) != @intFromEnum(b.type)) {
+            return false;
+        }
+        if (self.negated != b.negated) {
+            return false;
+        }
+        switch(self.type) {
+            .capturing => |capt| {
+                if (@intFromEnum(capt) != @intFromEnum(b.type.capturing)) {
+                    return false;
+                }
+            },
+            .non_capturing => |non_capt| {
+                if (@intFromEnum(non_capt) != @intFromEnum(b.type.non_capturing)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 };
 
 pub const RegexLeafAtomType = struct {
@@ -103,6 +124,80 @@ const RegexASTInternal = union(enum) { // Tagged union for node type.
         negated: bool,
     },
     epsilon: void, // Generic empty node.
+    pub fn equals(self: *const RegexASTInternal, b: *const RegexASTInternal) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
+        if (@intFromEnum(self.*) != @intFromEnum(b.*)) {
+            return false;
+        }
+        switch (self.*) {
+            .leaf_atom => {
+                if (!self.leaf_atom.equals(b.leaf_atom)) {
+                    return false;
+                }
+            },
+            .alternation => |alt| {
+                if (alt.parts.len != b.alternation.parts.len) {
+                    return false;
+                }
+                for (alt.parts, 0..) |_, i| {
+                    if (!alt.parts[i].equals(b.alternation.parts[i])) {
+                        return false;
+                    }
+                }
+            },
+            .concatenation => |concat| {
+                if (concat.parts.len != b.concatenation.parts.len) {
+                    return false;
+                }
+                for (concat.parts, 0..) |_, i| {
+                    if (!concat.parts[i].equals(b.concatenation.parts[i])) {
+                        return false;
+                    }
+                }
+            },
+            .group => |grp| {
+                if (grp.id != b.group.id) {
+                    return false;
+                }
+                if (!grp.expr.equals(b.group.expr)) {
+                    return false;
+                }
+                if (!grp.group_data.equals(b.group.group_data)) {
+                    return false;
+                }
+            },
+            .repetition => |rep| {
+                if (rep.reps.min != b.repetition.reps.min) {
+                    return false;
+                }
+                if (@intFromEnum(rep.reps.max) != @intFromEnum(b.repetition.reps.max)) {
+                    return false;
+                }
+                switch(rep.reps.max) {
+                    .bounded => |bound| {
+                        if (bound != b.repetition.reps.max.bounded) {
+                            return false;
+                        }
+                    },
+                    .unbounded => {},
+                }
+                if (!rep.child.equals(b.repetition.child)) {
+                    return false;
+                }
+            },
+            .class => |classItem| {
+                if (classItem.negated != b.class.negated) {
+                    return false;
+                }
+                for (classItem.items, 0..) |_, i| {
+                    if (!classItem.items[i].equals(b.class.items[i])) {
+                        return false;
+                    }
+                }
+            },
+            .epsilon => {}, // Epsilons contain no data and are always the same.
+        }
+        return true;
+    }
 };
 
 pub const RegexParsingError = error{
@@ -113,96 +208,6 @@ pub const RegexParsingError = error{
 };
 
 var EPSILON_UNIT: RegexASTInternal = .epsilon; // Generic epsilon copy used everywhere; contains no data.
-
-pub fn ASTIsEqual(a: RegexAST, b: RegexAST) bool {
-    if (@intFromEnum(a.*) != @intFromEnum(b.*)) {
-        return false;
-    }
-    switch (a.*) {
-        .leaf_atom => {
-            if (!a.leaf_atom.equals(b.leaf_atom)) {
-                return false;
-            }
-        },
-        .alternation => |alt| {
-            if (alt.parts.len != b.alternation.parts.len) {
-                return false;
-            }
-            for (alt.parts, 0..) |_, i| {
-                if (!ASTIsEqual(alt.parts[i], b.alternation.parts[i])) {
-                    return false;
-                }
-            }
-        },
-        .concatenation => |concat| {
-            if (concat.parts.len != b.concatenation.parts.len) {
-                return false;
-            }
-            for (concat.parts, 0..) |_, i| {
-                if (!ASTIsEqual(concat.parts[i], b.concatenation.parts[i])) {
-                    return false;
-                }
-            }
-        },
-        .group => |grp| {
-            if (grp.id != b.group.id) {
-                return false;
-            }
-            if (@intFromEnum(grp.group_data.type) != @intFromEnum(b.group.group_data.type)) {
-                return false;
-            }
-            if (grp.group_data.negated != b.group.group_data.negated) {
-                return false;
-            }
-            switch(grp.group_data.type) {
-                .capturing => |capt| {
-                    if (@intFromEnum(capt) != @intFromEnum(b.group.group_data.type.capturing)) {
-                        return false;
-                    }
-                },
-                .non_capturing => |non_capt| {
-                    if (@intFromEnum(non_capt) != @intFromEnum(b.group.group_data.type.non_capturing)) {
-                        return false;
-                    }
-                }
-            }
-            if (!ASTIsEqual(grp.expr, b.group.expr)) {
-                return false;
-            }
-        },
-        .repetition => |rep| {
-            if (rep.reps.min != b.repetition.reps.min) {
-                return false;
-            }
-            if (@intFromEnum(rep.reps.max) != @intFromEnum(b.repetition.reps.max)) {
-                return false;
-            }
-            switch(rep.reps.max) {
-                .bounded => |bound| {
-                    if (bound != b.repetition.reps.max.bounded) {
-                        return false;
-                    }
-                },
-                .unbounded => {},
-            }
-            if (!ASTIsEqual(rep.child, b.repetition.child)) {
-                return false;
-            }
-        },
-        .class => |classItem| {
-            if (classItem.negated != b.class.negated) {
-                return false;
-            }
-            for (classItem.items, 0..) |_, i| {
-                if (!classItem.items[i].equals(b.class.items[i])) {
-                    return false;
-                }
-            }
-        },
-        .epsilon => {}, // Epsilons contain no data and are always the same.
-    }
-    return true;
-}
 
 pub fn compileRegex(allocator: anytype, str_to_parse: []const u8) anyerror!RegexPattern {
     var i: usize = 0;
@@ -379,6 +384,7 @@ fn matchRequirementRange(ast: *const RegexASTInternal) RegexRepetitionRangeType 
 }
 
 // Makes a copy of an array without duplicates, in-order. Assumes that pointer elements in array are heap-allocated and single-pointers.
+// Types must be trivially comparable or structs/unions that implement an equals() method for duplicate checking.
 fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     const T = @TypeOf(arr[0]);
     var list = try std.ArrayList(T).initCapacity(allocator, 1);
@@ -392,22 +398,13 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
             switch(@typeInfo(T)) {
                 .pointer => |ptr| {
                     switch(@typeInfo(ptr.child)) {
-                        .@"struct" => {
-                            if(arr[i].*.equals(arr[j].*)) {
+                        .@"struct", .@"union" => {
+                            if(arr[i].equals(arr[j])) {
                                 freed[j] = true;
-                                try allocator.free(arr[j]);
-                            }
-                        },
-                        .@"union" => {
-                            switch(ptr.child) {
-                                RegexASTInternal => {
-                                    if (ASTIsEqual(arr[i], arr[j])) {
-                                        freed[j] = true;
-                                        try destroyRegexAST(allocator, arr[j]);
-                                    }
-                                },
-                                else => {
-                                    @compileError("Non-comparable type passed to remove duplicates function: " ++ @typeName(T));
+                                if (ptr.child == RegexASTInternal) {
+                                    try destroyRegexAST(allocator, arr[j]);
+                                } else {
+                                    try allocator.free(arr[j]);
                                 }
                             }
                         },
@@ -422,7 +419,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
                         }
                     }
                 },
-                .@"struct" => {
+                .@"struct", .@"union" => {
                     if(arr[i].equals(arr[j])) {
                         freed[j] = true;
                     }
@@ -615,6 +612,7 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
         const result: *RegexASTInternal = try allocator.create(RegexASTInternal);
+        errdefer allocator.destroy(result); // Only defers inside this if statement.
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
@@ -628,7 +626,6 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
                     j += 1;
                 }
                 if (j >= str_to_parse.len) {
-                    allocator.destroy(result);
                     return RegexParsingError.EndOfString;
                 }
                 const name: []const u8 = str_to_parse[i.* + 2..j];
@@ -647,7 +644,6 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
                 i.* += 2; // consume ?>
                 result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .name = null, .id = 0, .group_data = .{.type = .{.non_capturing = .atomic}, .negated = false}}}; // Atomic groups do not capture.
             } else { // ? found but no matching flag.
-                allocator.destroy(result);
                 return RegexParsingError.TokenNotFound;
             }
         } else if (i.* < str_to_parse.len - 1 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
@@ -664,7 +660,6 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
                 i.* += 2; // consume ?>
                 result.* = .{.group = .{.expr = try parseRegexExpr(allocator, str_to_parse, i), .name = null, .id = 0, .group_data = .{.type = .{.non_capturing = .atomic}, .negated = false}}}; // Atomic groups do not capture.
             } else { // ? found but no matching flag.
-                allocator.destroy(result);
                 return RegexParsingError.TokenNotFound;
             }
         } else { // otherwise, do regular group.
@@ -672,7 +667,6 @@ fn parseRegexFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) any
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
             try destroyRegexAST(allocator, result.group.expr);
-            allocator.destroy(result);
             return RegexParsingError.TokenNotFound;
         }
         i.* += 1; // consume ')'
