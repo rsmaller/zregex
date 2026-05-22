@@ -1,12 +1,13 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
-
-const RegexAST = *const RegexASTNode;
+const regex_type_machines = @import("regex_type_machines.zig");
 
 pub const RegexPattern = struct{
     ast: ?RegexAST,
     // instructions: []RegexInstruction,
 };
+
+const RegexAST = *const RegexASTNode;
 
 const RegexRepeaterType = enum {
     greedy,
@@ -81,27 +82,27 @@ const RegexGroupNode = struct {
         }
     },
     negated: bool,
-    pub fn equals(self: *const RegexGroupNode, b: RegexGroupNode) bool {
-        if (@intFromEnum(self.type) != @intFromEnum(b.type)) {
+    pub fn equals(self: *const RegexGroupNode, other: RegexGroupNode) bool {
+        if (@intFromEnum(self.type) != @intFromEnum(other.type)) {
             return false;
         }
-        if (self.id != b.id) {
+        if (self.id != other.id) {
             return false;
         }
-        if (!self.expr.equals(b.expr)) {
+        if (!self.expr.equals(other.expr)) {
             return false;
         }
-        if (self.negated != b.negated) {
+        if (self.negated != other.negated) {
             return false;
         }
         switch(self.type) {
             .capturing => |capt| {
-                if (@intFromEnum(capt) != @intFromEnum(b.type.capturing)) {
+                if (@intFromEnum(capt) != @intFromEnum(other.type.capturing)) {
                     return false;
                 }
             },
             .non_capturing => |non_capt| {
-                if (@intFromEnum(non_capt) != @intFromEnum(b.type.non_capturing)) {
+                if (@intFromEnum(non_capt) != @intFromEnum(other.type.non_capturing)) {
                     return false;
                 }
             }
@@ -126,7 +127,7 @@ const RegexLeafAtomNode = struct {
         },
     },
     inverted: bool,
-    fn equals(self: *const RegexLeafAtomNode, other: RegexLeafAtomNode) bool {
+    pub fn equals(self: *const RegexLeafAtomNode, other: RegexLeafAtomNode) bool {
         switch (self.leaf_atom) {
             .generic => |chr| {
                 if (chr != other.leaf_atom.generic) {
@@ -147,14 +148,14 @@ const RegexLeafAtomNode = struct {
     }
 };
 
-const RegexAlternationType = struct{
+const RegexAlternationNode = struct{
     parts: []*RegexASTNode,
-    pub fn equals(self: *const RegexAlternationType, b: RegexAlternationType) bool {
-        if (self.parts.len != b.parts.len) {
+    pub fn equals(self: *const RegexAlternationNode, other: RegexAlternationNode) bool {
+        if (self.parts.len != other.parts.len) {
             return false;
         }
         for (self.parts, 0..) |_, i| {
-            if (!self.parts[i].equals(b.parts[i])) {
+            if (!self.parts[i].equals(other.parts[i])) {
                 return false;
             }
         }
@@ -164,12 +165,12 @@ const RegexAlternationType = struct{
 
 const RegexConcatenationNode = struct{
     parts: []*RegexASTNode,  // Operation chaining two characters together.
-    pub fn equals(self: *const RegexConcatenationNode, b: RegexConcatenationNode) bool {
-        if (self.parts.len != b.parts.len) {
+    pub fn equals(self: *const RegexConcatenationNode, other: RegexConcatenationNode) bool {
+        if (self.parts.len != other.parts.len) {
             return false;
         }
         for (self.parts, 0..) |_, i| {
-            if (!self.parts[i].equals(b.parts[i])) {
+            if (!self.parts[i].equals(other.parts[i])) {
                 return false;
             }
         }
@@ -199,43 +200,49 @@ const RegexClassNode = struct { // Character class.
 const RegexASTNode = union(enum) { // Tagged union for node type.
     leaf_atom: RegexLeafAtomNode,
     concatenation: RegexConcatenationNode,
-    alternation: RegexAlternationType,
+    alternation: RegexAlternationNode,
     group: RegexGroupNode,
     repetition: RegexRepetitionNode,
     class: RegexClassNode,
     epsilon: void, // Generic empty node.
-    pub fn equals(self: *const RegexASTNode, b: *const RegexASTNode) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
-        if (@intFromEnum(self.*) != @intFromEnum(b.*)) {
+    pub fn equals(self: *const RegexASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
+        comptime {
+            if (regex_type_machines.UnwrappedPointer(@TypeOf(other)) != RegexASTNode) {
+                @compileError("Type of other node for comparison between RegexASTNode must also be a RegexASTNode or *RegexASTNode");
+            }
+        }
+        const other_unwrapped_pointer: RegexASTNode = regex_type_machines.unwrapPointer(other);
+        if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
             return false;
         }
         switch (self.*) {
             .leaf_atom => {
-                if (!self.leaf_atom.equals(b.leaf_atom)) {
+                if (!self.leaf_atom.equals(other_unwrapped_pointer.leaf_atom)) {
                     return false;
                 }
             },
             .alternation => |alt| {
-                if (!alt.equals(b.alternation)) {
+                if (!alt.equals(other_unwrapped_pointer.alternation)) {
                     return false;
                 }
             },
             .concatenation => |concat| {
-                if (!concat.equals(b.concatenation)) {
+                if (!concat.equals(other_unwrapped_pointer.concatenation)) {
                     return false;
                 }
             },
             .group => |grp| {
-                if (!grp.equals(b.group)) {
+                if (!grp.equals(other_unwrapped_pointer.group)) {
                     return false;
                 }
             },
             .repetition => |rep| {
-                if (!rep.equals(b.repetition)) {
+                if (!rep.equals(other_unwrapped_pointer.repetition)) {
                     return false;
                 }
             },
             .class => |classItem| {
-                if (!classItem.equals(b.class)) {
+                if (!classItem.equals(other_unwrapped_pointer.class)) {
                     return false;
                 }
             },
@@ -428,7 +435,7 @@ fn matchRequirementRange(ast: *const RegexASTNode) RegexRepetitionRangeType { //
     }
 }
 
-// Makes a copy of an array without duplicates, in-order. Assumes that pointer elements in array are heap-allocated and single-pointers.
+// Makes a copy of an array without duplicates, in-order. Assumes that pointer elements are heap-allocated and single-pointers.
 // Types must be trivially comparable or structs/unions that implement an equals() method for duplicate checking.
 fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     const T = @TypeOf(arr[0]);
@@ -440,42 +447,17 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
         if (freed[i]) continue;
         try list.append(allocator, item);
         for (i+1..arr.len) |j| {
-            switch(@typeInfo(T)) {
-                .pointer => |ptr| {
-                    switch(@typeInfo(ptr.child)) {
-                        .@"struct", .@"union" => {
-                            if(arr[i].equals(arr[j])) {
-                                freed[j] = true;
-                                if (ptr.child == RegexASTNode) {
-                                    try destroyRegexAST(allocator, arr[j]);
-                                } else {
-                                    try allocator.free(arr[j]);
-                                }
-                            }
-                        },
-                        .int, .float, .bool, .comptime_int, .comptime_float, .@"enum", .error_set => {
-                            if (arr[i].* == arr[j].*) {
-                                freed[j] = true;
-                                try allocator.free(arr[j]);
-                            }
-                        },
-                        else => {
-                            @compileError("Non-comparable type passed to remove duplicates function: " ++ @typeName(T));
+            if (regex_type_machines.genericEqualityDispatch(arr[i], arr[j])) {
+                freed[j] = true;
+                switch(@typeInfo(T)) {
+                    .pointer => |ptr| {
+                        if (ptr.child == RegexASTNode) {
+                            try destroyRegexAST(allocator, arr[j]);
+                        } else {
+                            try allocator.free(arr[j]);
                         }
-                    }
-                },
-                .@"struct", .@"union" => {
-                    if(arr[i].equals(arr[j])) {
-                        freed[j] = true;
-                    }
-                },
-                .int, .float, .bool, .comptime_int, .comptime_float, .@"enum", .error_set => {
-                    if (arr[i] == arr[j]) {
-                        freed[j] = true;
-                    }
-                },
-                else => { // Unions should only be handled when they are RegexAST unions.
-                    @compileError("Non-comparable type passed to remove duplicates function: " ++ @typeName(T));
+                    },
+                    else => {}
                 }
             }
         }
@@ -856,9 +838,7 @@ fn assertRepetitionAllowance(atom: *RegexASTNode,) !void {
                 else => {},
             }
         },
-        else => {
-
-        },
+        else => {},
     }
 }
 
@@ -998,17 +978,8 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLe
             'b', 'B' => { // Not allowed at all in char classes.
                 return RegexParsingError.TokenNotFound;
             },
-            else => {
-                // leave it alone
-            },
+            else => {},
         }
-    } else { // Bad edge case; here for later use if needed for refinement.
-        // switch(char_to_set) {
-        //     '$', '^', '(' => {
-        //         return RegexParsingError.TokenNotFound;
-        //     },
-        //     else => {},
-        // }
     }
     escaped = false;
     if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') { // Range syntax.
@@ -1043,8 +1014,7 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!RegexLe
                 'b', 'B', 'd', 'D', 's', 'S', 'w', 'W' => { // Characters not allowed in ranges or at all.
                     return RegexParsingError.TokenNotFound;
                 },
-                else => {
-                },
+                else => {},
             }
         } else {
             switch(char_to_set) {
