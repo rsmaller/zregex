@@ -1,6 +1,6 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
-const regex_type_machines = @import("regex_type_machines.zig");
+const regex_type_reflection = @import("regex_type_reflection.zig");
 
 pub const RegexPattern = struct{
     ast: ?RegexAST,
@@ -207,11 +207,11 @@ const RegexASTNode = union(enum) { // Tagged union for node type.
     epsilon: void, // Generic empty node.
     pub fn equals(self: *const RegexASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
         comptime {
-            if (regex_type_machines.UnwrappedPointer(@TypeOf(other)) != RegexASTNode) {
+            if (regex_type_reflection.UnwrappedPointer(@TypeOf(other)) != RegexASTNode) {
                 @compileError("Type of other node for comparison between RegexASTNode must also be a RegexASTNode or *RegexASTNode");
             }
         }
-        const other_unwrapped_pointer: RegexASTNode = regex_type_machines.unwrapPointer(other);
+        const other_unwrapped_pointer: RegexASTNode = regex_type_reflection.unwrapPointer(other);
         if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
             return false;
         }
@@ -467,7 +467,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
         if (freed[i]) continue;
         try list.append(allocator, item);
         for (i+1..arr.len) |j| {
-            if (regex_type_machines.genericEqualityDispatch(arr[i], arr[j])) {
+            if (regex_type_reflection.genericEqualityDispatch(arr[i], arr[j])) {
                 freed[j] = true;
                 switch(@typeInfo(T)) {
                     .pointer => |ptr| {
