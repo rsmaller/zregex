@@ -1,5 +1,6 @@
 const std = @import("std");
-const zregex = @import("./root.zig");
+const zregex = @import("root.zig");
+const regex_parser = @import("regex_parser.zig");
 
 test "a" {
     std.debug.print("Running test a\n", .{});
@@ -11,10 +12,10 @@ test "a" {
 
     const pattern = "a"; // Change this line to do another test.
 
-    const compiledPattern = try zregex.compileRegex(allocator, pattern);
-    defer zregex.destroyRegexPattern(allocator, compiledPattern) catch @panic("Could not free pattern!");
+    const compiledPattern = try zregex.compile(allocator, pattern);
+    defer zregex.destroyPattern(allocator, compiledPattern) catch @panic("Could not free pattern!");
 
-    const testAST: zregex.RegexAST = &.{
+    const testAST: regex_parser.AST = &.{
         .leaf_atom = .{
             .leaf_atom = .{.generic = 'a'},
             .inverted = false,
@@ -34,7 +35,7 @@ test "unclosed_brace" {
 
     const pattern = "a{"; // Change this line to change the test.
 
-    try std.testing.expectError(zregex.RegexParsingError.EndOfString, zregex.compileRegex(allocator, pattern));
+    try std.testing.expectError(regex_parser.ParsingError.EndOfString, zregex.compile(allocator, pattern));
 }
 
 test "unopened_brace" {
@@ -47,7 +48,7 @@ test "unopened_brace" {
 
     const pattern = "a}"; // Change this line to change the test.
 
-    try std.testing.expectError(zregex.RegexParsingError.TokenNotFound, zregex.compileRegex(allocator, pattern));
+    try std.testing.expectError(regex_parser.ParsingError.TokenNotFound, zregex.compile(allocator, pattern));
 }
 
 test "unclosed_group" {
@@ -60,7 +61,7 @@ test "unclosed_group" {
 
     const pattern = "a("; // Change this line to change the test.
 
-    try std.testing.expectError(zregex.RegexParsingError.EndOfString, zregex.compileRegex(allocator, pattern));
+    try std.testing.expectError(regex_parser.ParsingError.EndOfString, zregex.compile(allocator, pattern));
 }
 
 test "unopened_group" {
@@ -73,7 +74,7 @@ test "unopened_group" {
 
     const pattern = "a)"; // Change this line to change the test.
 
-    try std.testing.expectError(zregex.RegexParsingError.TokenNotFound, zregex.compileRegex(allocator, pattern));
+    try std.testing.expectError(regex_parser.ParsingError.TokenNotFound, zregex.compile(allocator, pattern));
 }
 
 test "unclosed_class" {
@@ -86,7 +87,7 @@ test "unclosed_class" {
 
     const pattern = "a["; // Change this line to change the test.
 
-    try std.testing.expectError(zregex.RegexParsingError.EndOfString, zregex.compileRegex(allocator, pattern));
+    try std.testing.expectError(regex_parser.ParsingError.EndOfString, zregex.compile(allocator, pattern));
 }
 
 test "unopened_class" {
@@ -99,5 +100,5 @@ test "unopened_class" {
 
     const pattern = "a]"; // Change this line to change the test.
 
-    try std.testing.expectError(zregex.RegexParsingError.TokenNotFound, zregex.compileRegex(allocator, pattern));
+    try std.testing.expectError(regex_parser.ParsingError.TokenNotFound, zregex.compile(allocator, pattern));
 }
