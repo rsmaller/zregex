@@ -20,7 +20,10 @@ pub fn main() !void {
     try stdout.print("Pattern: {s}\n", .{pattern});
     try stdout.flush();
 
-    try zregex.printAST(stdout, regexAST, true);
+    // try zregex.printAST(stdout, regexAST, true);
+    if (regexAST.ast) |ast| {
+        try zregex.regex_bytecode.emit(stdout, ast, true);
+    }
 
     try stdout.flush(); // Don't forget to flush!
 

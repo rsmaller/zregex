@@ -1,10 +1,12 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
-const regex_type_reflection = @import("regex_type_reflection.zig");
-const regex_parser = @import("regex_parser.zig");
+pub const core_regex_types = @import("core_regex_types.zig");
+pub const regex_type_reflection = @import("regex_type_reflection.zig");
+pub const regex_parser = @import("regex_parser.zig");
+pub const regex_bytecode = @import("regex_bytecode.zig");
 
 pub const Pattern = struct{
-    ast: ?regex_parser.AST,
+    ast: ?core_regex_types.AST,
     // instructions: []Instruction,
 };
 

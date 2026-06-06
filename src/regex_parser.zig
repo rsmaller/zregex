@@ -1,262 +1,11 @@
 const std = @import("std");
 const zregex = @import("root.zig");
 const regex_type_reflection = @import("regex_type_reflection.zig");
+const core_regex_types = @import("core_regex_types.zig");
 
-pub const AST = *const ASTNode;
+var EPSILON_UNIT: core_regex_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
-const RepeaterType = enum {
-    greedy,
-    lazy,
-    possessive,
-};
-
-const RepetitionBoundType = union(enum) {
-    bounded: usize,
-    unbounded: void,
-    pub fn equals(self: *const RepetitionBoundType, other: RepetitionBoundType) bool {
-        if (@intFromEnum(self.*) != @intFromEnum(other)) {
-            return false;
-        }
-        switch(self.*) {
-            .bounded => |bound| {
-                if (bound != other.bounded) {
-                    return false;
-                }
-            },
-            .unbounded => {},
-        }
-        return true;
-    }
-};
-
-const RepetitionRangeType = struct {
-    min: usize,
-    max: RepetitionBoundType,
-    pub fn equals(self: *const RepetitionRangeType, other: RepetitionRangeType) bool {
-        if (self.min != other.min) {
-            return false;
-        }
-        if (!self.max.equals(other.max)) {
-            return false;
-        }
-        return true;
-    }
-};
-
-const RepetitionNode = struct { // Parent node to another node constructed by a quantifier.
-    child: *ASTNode,
-    reps: RepetitionRangeType,
-    rep_type: RepeaterType,
-    pub fn equals(self: *const RepetitionNode, other: RepetitionNode) bool {
-        if (!self.reps.equals(other.reps)) {
-            return false;
-        }
-        if (self.rep_type != other.rep_type) {
-            return false;
-        }
-        if (!self.child.equals(other.child)) {
-            return false;
-        }
-        return true;
-    }
-};
-
-const GroupNode = struct {
-    expr: *ASTNode,
-    id: ?usize,
-    name: ?[]const u8, // Not nested in GroupNode for simplicity.
-    type: union(enum) {
-        capturing: union(enum) {
-            generic,
-        },
-        non_capturing: union(enum) {
-            generic,
-            atomic,
-            lookahead,
-            lookbehind,
-        }
-    },
-    negated: bool,
-    pub fn equals(self: *const GroupNode, other: GroupNode) bool {
-        if (@intFromEnum(self.type) != @intFromEnum(other.type)) {
-            return false;
-        }
-        if (self.id != other.id) {
-            return false;
-        }
-        if (!self.expr.equals(other.expr)) {
-            return false;
-        }
-        if (self.negated != other.negated) {
-            return false;
-        }
-        switch(self.type) {
-            .capturing => |capt| {
-                if (@intFromEnum(capt) != @intFromEnum(other.type.capturing)) {
-                    return false;
-                }
-            },
-            .non_capturing => |non_capt| {
-                if (@intFromEnum(non_capt) != @intFromEnum(other.type.non_capturing)) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-};
-
-const LeafAtomNode = struct {
-    leaf_atom: union(enum) {
-        generic: u8,
-        digit: void,
-        word: void,
-        word_boundary: void,
-        whitespace: void,
-        start_anchor: void,
-        end_anchor: void,
-        any: void,
-        range: struct { // For ranges within char classes. Cannot contain metacharacters.
-            character_min: u8,
-        character_max: u8,
-        },
-    },
-    inverted: bool,
-    pub fn equals(self: *const LeafAtomNode, other: LeafAtomNode) bool {
-        switch (self.leaf_atom) {
-            .generic => |chr| {
-                if (chr != other.leaf_atom.generic) {
-                    return false;
-                }
-            },
-            .range => |range| {
-                if (range.character_min != other.leaf_atom.range.character_min) {
-                    return false;
-                }
-                if (range.character_max != other.leaf_atom.range.character_max) {
-                    return false;
-                }
-            },
-            else => {},
-        }
-        return self.inverted == other.inverted;
-    }
-};
-
-const AlternationNode = struct{
-    parts: []*ASTNode,
-    pub fn equals(self: *const AlternationNode, other: AlternationNode) bool {
-        if (self.parts.len != other.parts.len) {
-            return false;
-        }
-        for (self.parts, 0..) |_, i| {
-            if (!self.parts[i].equals(other.parts[i])) {
-                return false;
-            }
-        }
-        return true;
-    }
-}; // Same as concatenation but semantically different and in a higher order function.
-
-const ConcatenationNode = struct{
-    parts: []*ASTNode,  // Operation chaining two characters together.
-    pub fn equals(self: *const ConcatenationNode, other: ConcatenationNode) bool {
-        if (self.parts.len != other.parts.len) {
-            return false;
-        }
-        for (self.parts, 0..) |_, i| {
-            if (!self.parts[i].equals(other.parts[i])) {
-                return false;
-            }
-        }
-        return true;
-    }
-};
-
-const ClassNode = struct { // Character class.
-    items: []LeafAtomNode,
-    negated: bool,
-    pub fn equals(self: *const ClassNode, other: ClassNode) bool {
-        if (self.negated != other.negated) {
-            return false;
-        }
-        if (self.items.len != other.items.len) {
-            return false;
-        }
-        for (0..self.items.len) |i| {
-            if (!self.items[i].equals(other.items[i])) {
-                return false;
-            }
-        }
-        return true;
-    }
-};
-
-const ASTNode = union(enum) { // Tagged union for node type.
-    leaf_atom: LeafAtomNode,
-    concatenation: ConcatenationNode,
-    alternation: AlternationNode,
-    group: GroupNode,
-    repetition: RepetitionNode,
-    class: ClassNode,
-    epsilon: void, // Generic empty node.
-    pub fn equals(self: *const ASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
-        comptime {
-            if (regex_type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
-                @compileError("Type of other node for comparison between ASTNode must also be a ASTNode or *ASTNode");
-            }
-        }
-        const other_unwrapped_pointer: ASTNode = regex_type_reflection.unwrapPointer(other);
-        if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
-            return false;
-        }
-        switch (self.*) {
-            .leaf_atom => {
-                if (!self.leaf_atom.equals(other_unwrapped_pointer.leaf_atom)) {
-                    return false;
-                }
-            },
-            .alternation => |alt| {
-                if (!alt.equals(other_unwrapped_pointer.alternation)) {
-                    return false;
-                }
-            },
-            .concatenation => |concat| {
-                if (!concat.equals(other_unwrapped_pointer.concatenation)) {
-                    return false;
-                }
-            },
-            .group => |grp| {
-                if (!grp.equals(other_unwrapped_pointer.group)) {
-                    return false;
-                }
-            },
-            .repetition => |rep| {
-                if (!rep.equals(other_unwrapped_pointer.repetition)) {
-                    return false;
-                }
-            },
-            .class => |classItem| {
-                if (!classItem.equals(other_unwrapped_pointer.class)) {
-                    return false;
-                }
-            },
-            .epsilon => {}, // Epsilons contain no data and are always the same.
-            }
-        return true;
-    }
-};
-
-pub const ParsingError = error{
-    TokenNotFound,
-    EndOfString,
-    InvalidRange,
-    VariableLookbehindRange,
-};
-
-var EPSILON_UNIT: ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
-
-fn setGroupIDs(ast: *ASTNode, id: *usize) !void {
+fn setGroupIDs(ast: *core_regex_types.ASTNode, id: *usize) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             switch(grp.type) {
@@ -292,7 +41,7 @@ fn setGroupIDs(ast: *ASTNode, id: *usize) !void {
     }
 }
 
-fn isEqualBound(a: RepetitionRangeType, b: RepetitionRangeType) bool {
+fn isEqualBound(a: core_regex_types.RepetitionRangeType, b: core_regex_types.RepetitionRangeType) bool {
     if (@intFromEnum(a.max) != @intFromEnum(b.max)) return false;
     switch(a.max) {
         .bounded => {
@@ -304,7 +53,7 @@ fn isEqualBound(a: RepetitionRangeType, b: RepetitionRangeType) bool {
     }
 }
 
-fn addBound(a: RepetitionRangeType, b: RepetitionRangeType) RepetitionRangeType {
+fn addBound(a: core_regex_types.RepetitionRangeType, b: core_regex_types.RepetitionRangeType) core_regex_types.RepetitionRangeType {
     var result = a;
     result.min += b.min;
     switch(a.max) {
@@ -326,7 +75,7 @@ fn addBound(a: RepetitionRangeType, b: RepetitionRangeType) RepetitionRangeType 
     }
 }
 
-fn timesBound(a: RepetitionRangeType, b: RepetitionRangeType) RepetitionRangeType {
+fn timesBound(a: core_regex_types.RepetitionRangeType, b: core_regex_types.RepetitionRangeType) core_regex_types.RepetitionRangeType {
     var result = a;
     result.min *= b.min;
     switch(a.max) {
@@ -348,7 +97,7 @@ fn timesBound(a: RepetitionRangeType, b: RepetitionRangeType) RepetitionRangeTyp
     }
 }
 
-fn alternationBound(a: RepetitionRangeType, b: RepetitionRangeType) RepetitionRangeType {
+fn alternationBound(a: core_regex_types.RepetitionRangeType, b: core_regex_types.RepetitionRangeType) core_regex_types.RepetitionRangeType {
     var result = a;
     if (a.min > b.min) {
         result.min = b.min;
@@ -374,8 +123,8 @@ fn alternationBound(a: RepetitionRangeType, b: RepetitionRangeType) RepetitionRa
     }
 }
 
-fn matchRequirementRange(ast: *const ASTNode) RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
-    var result = RepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
+fn matchRequirementRange(ast: *const core_regex_types.ASTNode) core_regex_types.RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
+    var result = core_regex_types.RepetitionRangeType{.min = 0, .max = .{.bounded = 0}};
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             return matchRequirementRange(grp.expr);
@@ -397,7 +146,7 @@ fn matchRequirementRange(ast: *const ASTNode) RepetitionRangeType { // This func
             return timesBound(rep.reps, matchRequirementRange(rep.child));
         },
         .class => {
-            return RepetitionRangeType{
+            return core_regex_types.RepetitionRangeType{
                 .min = 1,
                 .max = .{
                     .bounded = 1
@@ -407,7 +156,7 @@ fn matchRequirementRange(ast: *const ASTNode) RepetitionRangeType { // This func
         .leaf_atom => |leaf| {
             switch(leaf.leaf_atom) {
                 .word_boundary, .start_anchor, .end_anchor => {
-                    return RepetitionRangeType{
+                    return core_regex_types.RepetitionRangeType{
                         .min = 0,
                         .max = .{
                             .bounded = 0
@@ -415,7 +164,7 @@ fn matchRequirementRange(ast: *const ASTNode) RepetitionRangeType { // This func
                     };
                 },
                 else => {
-                    return RepetitionRangeType{
+                    return core_regex_types.RepetitionRangeType{
                         .min = 1,
                         .max = .{
                             .bounded = 1
@@ -425,7 +174,7 @@ fn matchRequirementRange(ast: *const ASTNode) RepetitionRangeType { // This func
             }
         },
         .epsilon => {
-            return RepetitionRangeType{
+            return core_regex_types.RepetitionRangeType{
                 .min = 0,
                 .max = .{
                     .bounded = 0
@@ -451,7 +200,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
                 freed[j] = true;
                 switch(@typeInfo(T)) {
                     .pointer => |ptr| {
-                        if (ptr.child == ASTNode) {
+                        if (ptr.child == core_regex_types.ASTNode) {
                             try destroyAST(allocator, arr[j]);
                         } else {
                             try allocator.free(arr[j]);
@@ -465,18 +214,18 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     return try list.toOwnedSlice(allocator);
 }
 
-fn trimAST(ast: *ASTNode, allocator: anytype) !void {
+fn trimAST(ast: *core_regex_types.ASTNode, allocator: anytype) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             if (grp.negated) {
             switch(grp.type) {
                 .capturing => {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 },
                 .non_capturing => |non_capt| {
                     switch(non_capt) {
                         .atomic, .generic => {
-                            return ParsingError.TokenNotFound;
+                            return core_regex_types.ParsingError.TokenNotFound;
                         },
                         else => {},
                     }
@@ -491,11 +240,11 @@ fn trimAST(ast: *ASTNode, allocator: anytype) !void {
                             const len = matchRequirementRange(grp.expr);
                             switch(len.max) {
                                 .unbounded => {
-                                    return ParsingError.VariableLookbehindRange;
+                                    return core_regex_types.ParsingError.VariableLookbehindRange;
                                 },
                                 .bounded => {
                                     if (len.max.bounded != len.min) {
-                                        return ParsingError.VariableLookbehindRange;
+                                        return core_regex_types.ParsingError.VariableLookbehindRange;
                                     }
                                 }
                             }
@@ -533,9 +282,9 @@ fn trimAST(ast: *ASTNode, allocator: anytype) !void {
     }
 }
 
-fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ASTNode {
-    var result = try allocator.create(ASTNode);
-    var result_list = try std.ArrayList(*ASTNode).initCapacity(allocator, 1);
+fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_regex_types.ASTNode {
+    var result = try allocator.create(core_regex_types.ASTNode);
+    var result_list = try std.ArrayList(*core_regex_types.ASTNode).initCapacity(allocator, 1);
     defer {
         result_list.deinit(allocator);
     }
@@ -545,7 +294,7 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
         }
         allocator.destroy(result);
     }
-    if (i.* >= str_to_parse.len) return ParsingError.EndOfString; // Error out after deferring.
+    if (i.* >= str_to_parse.len) return core_regex_types.ParsingError.EndOfString; // Error out after deferring.
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
         try result_list.append(allocator, &EPSILON_UNIT);
     } else { // If not an epsilon, just parse the first alternation as a regular term.
@@ -576,10 +325,10 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
-fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ASTNode {
-    if (i.* >= str_to_parse.len) return ParsingError.EndOfString;
-    var result = try allocator.create(ASTNode);
-    var result_list = try std.ArrayList(*ASTNode).initCapacity(allocator, 1);
+fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_regex_types.ASTNode {
+    if (i.* >= str_to_parse.len) return core_regex_types.ParsingError.EndOfString;
+    var result = try allocator.create(core_regex_types.ASTNode);
+    var result_list = try std.ArrayList(*core_regex_types.ASTNode).initCapacity(allocator, 1);
     defer {
         result_list.deinit(allocator);
     }
@@ -607,10 +356,10 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
-fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ASTNode {
-    if (i.* >= str_to_parse.len) return ParsingError.EndOfString;
-    const result = try allocator.create(ASTNode);
-    var result_list = try std.ArrayList(LeafAtomNode).initCapacity(allocator, 1);
+fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_regex_types.ASTNode {
+    if (i.* >= str_to_parse.len) return core_regex_types.ParsingError.EndOfString;
+    const result = try allocator.create(core_regex_types.ASTNode);
+    var result_list = try std.ArrayList(core_regex_types.LeafAtomNode).initCapacity(allocator, 1);
     var negated: bool = false;
     defer {
         result_list.deinit(allocator);
@@ -622,17 +371,17 @@ fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         negated = true;
         i.* += 1;
         if (i.* >= str_to_parse.len) {
-            return ParsingError.EndOfString;
+            return core_regex_types.ParsingError.EndOfString;
         }
     }
-    var item: LeafAtomNode = undefined;
+    var item: core_regex_types.LeafAtomNode = undefined;
     while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
         item = try fetchCharOrRangeInClass(str_to_parse, i); // Parse the first item in the class.
         try result_list.append(allocator, item);
         i.* += 1;
     }
     if (i.* >= str_to_parse.len) {
-        return ParsingError.EndOfString;
+        return core_regex_types.ParsingError.EndOfString;
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
     result.* = .{
@@ -644,11 +393,11 @@ fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     return result;
 }
 
-fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ASTNode {
-    if (i.* >= str_to_parse.len) return ParsingError.EndOfString;
+fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_regex_types.ASTNode {
+    if (i.* >= str_to_parse.len) return core_regex_types.ParsingError.EndOfString;
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
-        const result: *ASTNode = try allocator.create(ASTNode);
+        const result: *core_regex_types.ASTNode = try allocator.create(core_regex_types.ASTNode);
         errdefer allocator.destroy(result); // Only defers inside this if statement.
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
@@ -681,7 +430,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                 j += 1;
             }
             if (j >= str_to_parse.len) {
-                return ParsingError.EndOfString;
+                return core_regex_types.ParsingError.EndOfString;
             }
             const name: []const u8 = str_to_parse[i.* + 2..j];
             i.* = j + 1;
@@ -749,7 +498,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                 }
             };
         } else { // ? found but no matching flag.
-                return ParsingError.TokenNotFound;
+                return core_regex_types.ParsingError.TokenNotFound;
         }
         } else if (i.* < str_to_parse.len - 1 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
             if (str_to_parse[i.* + 1] == '=') {
@@ -805,7 +554,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                 }
             };
         } else { // ? found but no matching flag.
-                return ParsingError.TokenNotFound;
+                return core_regex_types.ParsingError.TokenNotFound;
         }
         } else { // otherwise, do regular group.
             result.* = .{
@@ -822,7 +571,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
             try destroyAST(allocator, result.group.expr);
-            return ParsingError.TokenNotFound;
+            return core_regex_types.ParsingError.TokenNotFound;
         }
         i.* += 1; // consume ')'
         if (i.* < str_to_parse.len) { // Don't check quantifiers when ) is at the end of the string.
@@ -831,14 +580,14 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             return result;
         }
     }
-    var atom = try allocator.create(ASTNode);
+    var atom = try allocator.create(core_regex_types.ASTNode);
     var metacharacter: bool = undefined;
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
         i.* += 1; // Consume backslash.
         if (i.* >= str_to_parse.len) {
         allocator.destroy(atom);
-        return ParsingError.EndOfString;
+        return core_regex_types.ParsingError.EndOfString;
     }
         escaped = true;
         metacharacter = isEscapedMetacharacter(str_to_parse[i.*]);
@@ -880,7 +629,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
     };
 }
 
-fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !LeafAtomNode {
+fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !core_regex_types.LeafAtomNode {
     switch(metacharacter) {
         true => {
             switch(char_to_set) {
@@ -951,7 +700,7 @@ fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !LeafAtomNode {
                     };
                 },
                 '(', ')', '[', ']', '{', '}', '|' => {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 },
                 else => {
                     return .{
@@ -996,23 +745,23 @@ fn isEscapedMetacharacter(character: u8) bool {
     }
 }
 
-fn assertRepetitionAllowance(atom: *ASTNode,) !void {
+fn assertRepetitionAllowance(atom: *core_regex_types.ASTNode) !void {
     switch (atom.*) { // Validate that node is allowed to be repeated.
         .group => |grp| {
         switch(grp.type) {
             .non_capturing => {
-                return ParsingError.TokenNotFound;
+                return core_regex_types.ParsingError.TokenNotFound;
             },
             else => {},
         }
     },
         .epsilon, .repetition, => {
-            return ParsingError.TokenNotFound;
+            return core_regex_types.ParsingError.TokenNotFound;
         },
         .leaf_atom => |leaf| {
             switch(leaf.leaf_atom) {
                 .end_anchor, .start_anchor, .word_boundary => {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 },
                 else => {},
             }
@@ -1021,13 +770,13 @@ fn assertRepetitionAllowance(atom: *ASTNode,) !void {
     }
 }
 
-fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ASTNode {
+fn checkQuantifiers(atom: *core_regex_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_regex_types.ASTNode {
     var count_min: usize = undefined;
-    var count_max: RepetitionBoundType = undefined;
+    var count_max: core_regex_types.RepetitionBoundType = undefined;
     if (i.* >= str_to_parse.len) {
-        return ParsingError.EndOfString;
+        return core_regex_types.ParsingError.EndOfString;
     }
-    var repetition_container: RepetitionRangeType = undefined;
+    var repetition_container: core_regex_types.RepetitionRangeType = undefined;
     switch (str_to_parse[i.*]) {
         '*' => {
             try assertRepetitionAllowance(atom);
@@ -1059,7 +808,7 @@ fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8
             try assertRepetitionAllowance(atom);
             i.* += 1; // Skip past curly brace.
             if (i.* >= str_to_parse.len) {
-                return ParsingError.EndOfString;
+                return core_regex_types.ParsingError.EndOfString;
             }
             if (str_to_parse[i.*] == ',') { // If no number is present before the , then the min is 0.
                 count_min = 0;
@@ -1073,7 +822,7 @@ fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8
             } else {
                 i.* += 1;
                 if (i.* >= str_to_parse.len) {
-                    return ParsingError.EndOfString;
+                    return core_regex_types.ParsingError.EndOfString;
                 }
                 if (str_to_parse[i.*] == '}') { // If comma is encountered but no ending number is found, then max is the largest possible int.
                     count_max = .unbounded;
@@ -1084,7 +833,7 @@ fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8
                 }
             }
             if (i.* >= str_to_parse.len or str_to_parse[i.*] != '}') {
-                return ParsingError.TokenNotFound;
+                return core_regex_types.ParsingError.TokenNotFound;
             }
             repetition_container = .{.min = count_min, .max = count_max};
             i.* += 1;
@@ -1093,7 +842,7 @@ fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8
             return atom;
         },
     }
-    var rep_type: RepeaterType = .greedy;
+    var rep_type: core_regex_types.RepeaterType = .greedy;
     if (i.* < str_to_parse.len and str_to_parse[i.*] == '+') {
         rep_type = .possessive;
         i.* += 1; // Consume the possessive +.
@@ -1101,7 +850,7 @@ fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8
         rep_type = .lazy;
         i.* += 1; // Consume the lazy ?.
     }
-    const atom_parent = try allocator.create(ASTNode); // Construct repetition node and wrap atom in it.
+    const atom_parent = try allocator.create(core_regex_types.ASTNode); // Construct repetition node and wrap atom in it.
     atom_parent.* = .{
         .repetition = .{
             .child = atom,
@@ -1112,12 +861,12 @@ fn checkQuantifiers(atom: *ASTNode, allocator: anytype, str_to_parse: []const u8
     return atom_parent;
 }
 
-fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!LeafAtomNode { // For use in character class compilation to tokenize with '-' syntax awareness.
+fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!core_regex_types.LeafAtomNode { // For use in character class compilation to tokenize with '-' syntax awareness.
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') {
         i.* += 1; // Consume backslash.
         if (i.* >= str_to_parse.len) {
-            return ParsingError.EndOfString;
+            return core_regex_types.ParsingError.EndOfString;
         }
         escaped = true;
     }
@@ -1137,42 +886,42 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!LeafAto
             },
             'd' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 }
                 return .{.leaf_atom = .digit, .inverted = false};
             },
             'D' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 }
                 return .{.leaf_atom = .digit, .inverted = true};
             },
             'w' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 }
                 return .{.leaf_atom = .word, .inverted = false};
             },
             'W' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 }
                 return .{.leaf_atom = .word, .inverted = true};
             },
             's' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 }
                 return .{.leaf_atom = .whitespace, .inverted = false};
             },
             'S' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 }
                 return .{.leaf_atom = .whitespace, .inverted = true};
             },
             'b', 'B' => { // Not allowed at all in char classes.
-                return ParsingError.TokenNotFound;
+                return core_regex_types.ParsingError.TokenNotFound;
             },
             else => {},
         }
@@ -1189,12 +938,12 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!LeafAto
     }
         i.* += 2; // Skip past current item and -.
         if (i.* >= str_to_parse.len) {
-            return ParsingError.EndOfString;
+            return core_regex_types.ParsingError.EndOfString;
         }
         if (str_to_parse[i.*] == '\\') {
             i.* += 1; // Consume backslash.
             if (i.* >= str_to_parse.len) {
-                return ParsingError.EndOfString;
+                return core_regex_types.ParsingError.EndOfString;
             }
             escaped = true;
         }
@@ -1213,20 +962,20 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!LeafAto
                 ']' => {
                 },
                 'b', 'B', 'd', 'D', 's', 'S', 'w', 'W' => { // Characters not allowed in ranges or at all.
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 },
                 else => {},
             }
         } else {
             switch(char_to_set) {
                 '$', '^', '(' => {
-                    return ParsingError.TokenNotFound;
+                    return core_regex_types.ParsingError.TokenNotFound;
                 },
                 else => {},
             }
         }
         if (char_to_set >= char_to_set2) {
-            return ParsingError.InvalidRange;
+            return core_regex_types.ParsingError.InvalidRange;
         }
         return .{
             .leaf_atom = .{
@@ -1246,7 +995,7 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!LeafAto
     }; // If range is found, make range node.
 }
 
-fn printLeafAtom(out_interface: anytype, leaf: LeafAtomNode) !void {
+fn printLeafAtom(out_interface: anytype, leaf: core_regex_types.LeafAtomNode) !void {
     switch(leaf.leaf_atom) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;
@@ -1302,11 +1051,11 @@ fn printLeafAtom(out_interface: anytype, leaf: LeafAtomNode) !void {
     }
 }
 
-fn printASTRecursive(out_interface: anytype, ast: *const ASTNode, show_match_width: bool, recursion_level: usize) !void {
+fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNode, show_match_width: bool, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
-    const len: RepetitionRangeType = matchRequirementRange(ast);
+    const len: core_regex_types.RepetitionRangeType = matchRequirementRange(ast);
     if (show_match_width) {
         switch (len.max) {
             .bounded => {
@@ -1378,7 +1127,7 @@ pub fn printAST(out_interface: anytype, pattern: zregex.Pattern, show_match_widt
     }
 }
 
-pub fn destroyAST(allocator: anytype, pattern: AST) !void {
+pub fn destroyAST(allocator: anytype, pattern: core_regex_types.AST) !void {
     switch (pattern.*) {
         .leaf_atom => {},
         .alternation => |alt| {
@@ -1409,7 +1158,7 @@ pub fn destroyAST(allocator: anytype, pattern: AST) !void {
     allocator.destroy(pattern);
 }
 
-pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!AST {
+pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!core_regex_types.AST {
     var i: usize = 0;
     var j: usize = 1; // ID 0 is reserved for whole match.
     const ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
@@ -1417,7 +1166,7 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!AST {
         destroyAST(allocator, ast) catch @panic("Failed to free AST after error!");
     }
     if (i != str_to_parse.len) {
-        return ParsingError.TokenNotFound;
+        return core_regex_types.ParsingError.TokenNotFound;
     }
     try setGroupIDs(ast, &j);
     try trimAST(ast, allocator);
