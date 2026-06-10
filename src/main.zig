@@ -14,15 +14,19 @@ pub fn main() !void {
     const stdout = &stdout_writer.interface;
 
     // const pattern: []const u8 = "(?<=abc|ab)(?<name1>hiii)(|a|b|c|a|)\\ba \\B [\\q-\\z]^\\[\\*\\..(?>abc)\\n(|)(?=\\s{3,}+|)(?!\\s{3,}+|)(?<=az)[^\\t-\\n](?<!az)[abc]+?-(|\\d{,5})-(\\d{,}|-\\d{15})$";
-    const pattern: []const u8 = "[((((abcd)))))](?<=abc)(?<name1>hiii)(|a|b|c|a|)\\ba \\B [\\q-\\z]^\\[\\*\\..(?>abc)\\n(|)(?=\\s{3,}+|)(?!\\s{3,}+|)(?<=az)[^\\t-\\n](?<!az)[abc]+?-(|\\d{,5})-(\\d{,}|-\\d{15})$";
+    // const pattern: []const u8 = "[((((abcd)))))](?<=abc)(?<name1>hiii)(|a|b|c|a|)\\ba \\B [\\q-\\z]^\\[\\*\\..(?>abc)\\n(|)(?=\\s{3,}+|)(?!\\s{3,}+|)(?<=az)[^\\t-\\n](?<!az)[abc]+?-(|\\d{,5})-(\\d{,}|-\\d{15})$";
     // const pattern: []const u8 = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    const pattern = "(abc|ab|ac|zz)123";
     const regexAST = try zregex.compile(allocator, pattern);
     try stdout.print("Pattern: {s}\n", .{pattern});
     try stdout.flush();
 
     // try zregex.printAST(stdout, regexAST, true);
     if (regexAST.ast) |ast| {
-        try zregex.regex_bytecode.emit(stdout, ast, true);
+        const result = try zregex.regex_bytecode.emit(allocator, stdout, ast, true);
+        try zregex.regex_bytecode.readOutBytecode(stdout, result);
+        defer allocator.free(result);
+
     }
 
     try stdout.flush(); // Don't forget to flush!

@@ -250,3 +250,7 @@ pub const ParsingError = error{
     InvalidRange,
     VariableLookbehindRange,
 };
+
+pub const BytecodeGenError = error{
+    InvalidGroupID,
+};
