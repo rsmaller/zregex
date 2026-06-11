@@ -11,6 +11,16 @@ const Instruction = union(enum) {
     end_match: void,
     capture_start: usize,
     capture_end: usize,
+    atomic_start: void,
+    atomic_end: void,
+    lookahead_start: void,
+    lookahead_end: void,
+    lookbehind_start: usize,
+    lookbehind_end: void,
+    neg_lookahead_start: void,
+    neg_lookahead_end: void,
+    neg_lookbehind_start: usize,
+    neg_lookbehind_end: void,
 };
 
 pub fn emit(allocator: anytype, out_interface: anytype, ast: *const core_regex_types.ASTNode, show_match_width: bool) ![]Instruction {
@@ -55,28 +65,114 @@ fn propagateFixups(fixups: []usize, labels: []usize, instructions: []Instruction
     }
 }
 
+fn printLeafAtom(out_interface: anytype, leaf: core_regex_types.LeafAtomNode) !void {
+    switch(leaf.leaf_atom) {
+        .generic => |gen_leaf| {
+            var buf: [2]u8 = undefined;
+            if (gen_leaf == '\n') {
+                buf[0] = '\\';
+                buf[1] = 'n';
+            } else if (gen_leaf == '\t') {
+                buf[0] = '\\';
+                buf[1] = 't';
+            } else if (gen_leaf == '\r') {
+                buf[0] = '\\';
+                buf[1] = 'r';
+            } else {
+                buf[0] = gen_leaf;
+                buf[1] = 0;
+            }
+            try out_interface.print("LITERAL(char = {s})\n", .{buf});
+        },
+        .range => |range| {
+            var buf: [2]u8 = undefined;
+            var buf2: [2]u8 = undefined;
+            if (range.character_min == '\n') {
+                buf[0] = '\\';
+                buf[1] = 'n';
+            } else if (range.character_min == '\t') {
+                buf[0] = '\\';
+                buf[1] = 't';
+            } else if (range.character_min == '\r') {
+                buf[0] = '\\';
+                buf[1] = 'r';
+            } else {
+                buf[0] = range.character_min;
+                buf[1] = 0;
+            }
+            if (range.character_max == '\n') {
+                buf2[0] = '\\';
+                buf2[1] = 'n';
+            } else if (range.character_max == '\t') {
+                buf2[0] = '\\';
+                buf2[1] = 't';
+            } else if (range.character_max == '\r') {
+                buf2[0] = '\\';
+                buf2[1] = 'r';
+            } else {
+                buf2[0] = range.character_max;
+                buf2[1] = 0;
+            }
+            try out_interface.print("RANGE(min = {s}, max = {s})\n", .{buf, buf2});
+        },
+        else => {
+            try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{@tagName(leaf.leaf_atom), leaf.inverted});
+        },
+    }
+}
+
 pub fn readOutBytecode(out_interface: anytype, bytecode: []Instruction) !void {
     for (0..bytecode.len) |i| {
         try out_interface.print("{d}:\t", .{i});
         switch(bytecode[i]) {
             .split => |spl| {
-                try out_interface.print("SPLIT {d} {d}\n", .{spl.left, spl.right});
+                try out_interface.print("SPLIT({d}, {d})\n", .{spl.left, spl.right});
             },
             .jmp => |jmp| {
-                try out_interface.print("JMP {d}\n", .{jmp});
+                try out_interface.print("JMP({d})\n", .{jmp});
             },
             .end_match => {
                 try out_interface.print("MATCH\n", .{});
             },
-            .literal => {
-                try out_interface.print("LITERAL\n", .{});
+            .literal => |lit| {
+                try printLeafAtom(out_interface, lit);
             },
             .capture_start => |cap| {
-                try out_interface.print("CAP_START {d}\n", .{cap});
+                try out_interface.print("CAP_START({d})\n", .{cap});
             },
             .capture_end => |cap| {
-                try out_interface.print("CAP_END {d}\n", .{cap});
-            }
+                try out_interface.print("CAP_END({d})\n", .{cap});
+            },
+            .atomic_start => {
+                try out_interface.print("ATOMIC_START\n", .{});
+            },
+            .atomic_end => {
+                try out_interface.print("ATOMIC_END\n", .{});
+            },
+            .lookahead_start => {
+                try out_interface.print("LOOKAHEAD_START\n", .{});
+            },
+            .lookahead_end => {
+                try out_interface.print("LOOKAHEAD_END\n", .{});
+            },
+            .lookbehind_start => |len| {
+                try out_interface.print("LOOKBEHIND_START({d})\n", .{len});
+            },
+            .lookbehind_end => {
+                try out_interface.print("LOOKBEHIND_END\n", .{});
+            },
+            .neg_lookahead_start => {
+                try out_interface.print("NEG_LOOKAHEAD_START\n", .{});
+            },
+            .neg_lookahead_end => {
+                try out_interface.print("NEG_LOOKAHEAD_END\n", .{});
+            },
+            .neg_lookbehind_start => |len| {
+                try out_interface.print("NEG_LOOKBEHIND_START({d})\n", .{len});
+            },
+            .neg_lookbehind_end => {
+                try out_interface.print("NEG_LOOKBEHIND_END\n", .{});
+            },
             // else => {
             //     try out_interface.print("OTHER\n", .{});
             // }
@@ -165,8 +261,50 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         return core_regex_types.BytecodeGenError.InvalidGroupID;
                     }
                 },
-                .non_capturing => {
-                    try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
+                .non_capturing => |grp_type| {
+                    switch(grp_type) {
+                        .atomic => {
+                            try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                            _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .atomic_start, instruction_ptr);
+                            try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
+                            try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                            _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .atomic_end, instruction_ptr);
+                        },
+                        .generic => {
+
+                        },
+                        .lookahead => {
+                            if (grp.negated) {
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .neg_lookahead_start, instruction_ptr);
+                                try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .neg_lookahead_end, instruction_ptr);
+                            } else {
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .lookahead_start, instruction_ptr);
+                                try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .lookahead_end, instruction_ptr);
+                            }
+                        },
+                        .lookbehind => |look| {
+                            if (grp.negated) {
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{.neg_lookbehind_start = look }, instruction_ptr);
+                                try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .neg_lookbehind_end, instruction_ptr);
+                            } else {
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{.lookbehind_start = look }, instruction_ptr);
+                                try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
+                                try emitLabel(allocator, labels, out_interface, instruction_ptr);
+                                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .lookbehind_end, instruction_ptr);
+                            }
+                        }
+                    }
+                    // try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
                 },
             }
         },
@@ -176,9 +314,9 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             }
         },
         .class => |class_item| {
-            for (0..class_item.items.len) |i| {
-                _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .literal = class_item.items[i] }, instruction_ptr);
-            }
+            // for (0..class_item.items.len) |i| {
+            //     _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .literal = class_item.items[i] }, instruction_ptr);
+            // }
         },
         .epsilon => {
         },

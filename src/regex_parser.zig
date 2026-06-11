@@ -232,28 +232,29 @@ fn trimAST(ast: *core_regex_types.ASTNode, allocator: anytype) !void {
                 }
             }
         }
-            switch(grp.type) {
-                .capturing => {},
-                .non_capturing => |non_capt| {
-                    switch(non_capt) {
-                        .lookbehind => {
-                            const len = matchRequirementRange(grp.expr);
-                            switch(len.max) {
-                                .unbounded => {
+        switch(grp.type) {
+            .capturing => {},
+            .non_capturing => |non_capt| {
+                switch(non_capt) {
+                    .lookbehind => {
+                        const len = matchRequirementRange(grp.expr);
+                        switch(len.max) {
+                            .unbounded => {
+                                return core_regex_types.ParsingError.VariableLookbehindRange;
+                            },
+                            .bounded => {
+                                if (len.max.bounded != len.min) {
                                     return core_regex_types.ParsingError.VariableLookbehindRange;
-                                },
-                                .bounded => {
-                                    if (len.max.bounded != len.min) {
-                                        return core_regex_types.ParsingError.VariableLookbehindRange;
-                                    }
                                 }
+                                ast.group.type.non_capturing.lookbehind = len.max.bounded;
                             }
-                        },
-                        else => {},
-                    }
+                        }
+                    },
+                    else => {},
                 }
             }
-            try trimAST(grp.expr, allocator);
+        }
+        try trimAST(grp.expr, allocator);
         }, // outside of group, just recurse.
         .alternation => {
         const old_alt_parts = ast.alternation.parts;
@@ -407,7 +408,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                     .expr = try parseExpr(allocator, str_to_parse, i),
                     .name = null, .id = 0,
                     .type = .{
-                        .non_capturing = .lookbehind
+                        .non_capturing = .{.lookbehind = 0},
                     },
                     .negated = false
                 }
@@ -420,7 +421,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                     .name = null,
                     .id = 0,
                     .type = .{
-                        .non_capturing = .lookbehind
+                        .non_capturing = .{.lookbehind = 0},
                     },
                     .negated = true}
             };

@@ -67,10 +67,10 @@ pub const GroupNode = struct {
             generic,
         },
         non_capturing: union(enum) {
-            generic,
-            atomic,
-            lookahead,
-            lookbehind,
+            generic: void,
+            atomic: void,
+            lookahead: void,
+            lookbehind: usize,
         }
     },
     negated: bool,
