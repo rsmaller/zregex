@@ -73,11 +73,17 @@ pub fn genericEqualityDispatch(a: anytype, b: anytype) bool {  // Compares two i
             return item1 == item2;
         },
         .@"struct", .@"union" => {
-            assertDeclExists(T, "equals", std.builtin.Type.Fn);
-            return item1.equals(item2);
+            assertDeclExists(T, "equals", std.builtin.Type.Fn); // When comparing structs and unions, ensure both have the equals method and agree on equality.
+            return item1.equals(item2) and item2.equals(item1);
         },
         else => {
             @compileError("Types " ++ @TypeOf(a) ++ " and " ++ @TypeOf(b) ++ " are not comparable");
         }
+    }
+}
+
+pub fn assertTypeEquality(a: type, b: type) void {
+    if (a != b) {
+        @compileError("Expected type " ++ a ++ " but received type " ++ b);
     }
 }

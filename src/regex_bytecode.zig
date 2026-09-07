@@ -1,11 +1,18 @@
 const std = @import("std");
 const core_regex_types = @import("core_regex_types.zig");
+const regex_gen_util = @import("regex_gen_util.zig");
 
 const Instruction = union(enum) {
     split: struct {
         left: usize,
         right: usize,
     },
+    repeat_start: struct {
+        min: usize,
+        max: core_regex_types.RepetitionBoundType,
+        mode: core_regex_types.RepeaterType,
+    },
+    repeat_end: void,
     jmp: usize,
     literal: core_regex_types.LeafAtomNode,
     end_match: void,
@@ -21,6 +28,7 @@ const Instruction = union(enum) {
     neg_lookahead_end: void,
     neg_lookbehind_start: usize,
     neg_lookbehind_end: void,
+    class: u256, // binary-optimized for every 8-bit character.
 };
 
 pub fn emit(allocator: anytype, out_interface: anytype, ast: *const core_regex_types.ASTNode, show_match_width: bool) ![]Instruction {
@@ -31,8 +39,8 @@ pub fn emit(allocator: anytype, out_interface: anytype, ast: *const core_regex_t
     var instructions: std.ArrayList(Instruction) = try std.ArrayList(Instruction).initCapacity(allocator, 8);
     defer instructions.deinit(allocator);
     var instruction_index: usize = 0;
-    try emitRecursive(allocator, &labels, &instructions, &fixups, out_interface, ast, show_match_width, &instruction_index, 0);
     try emitLabel(allocator, &labels, out_interface, &instruction_index);
+    try emitRecursive(allocator, &labels, &instructions, &fixups, out_interface, ast, show_match_width, &instruction_index, 0);
     _ = try emitInstruction(out_interface, allocator, &labels, &instructions, &fixups, .end_match, &instruction_index);
     for (0..labels.items.len) |i| {
         try out_interface.print("{d}:{d} ", .{i, labels.items[i]});
@@ -121,7 +129,7 @@ fn printLeafAtom(out_interface: anytype, leaf: core_regex_types.LeafAtomNode) !v
     }
 }
 
-pub fn readOutBytecode(out_interface: anytype, bytecode: []Instruction) !void {
+pub fn readOutBytecode(allocator: anytype, out_interface: anytype, bytecode: []Instruction) !void {
     for (0..bytecode.len) |i| {
         try out_interface.print("{d}:\t", .{i});
         switch(bytecode[i]) {
@@ -130,6 +138,24 @@ pub fn readOutBytecode(out_interface: anytype, bytecode: []Instruction) !void {
             },
             .jmp => |jmp| {
                 try out_interface.print("JMP({d})\n", .{jmp});
+            },
+            .repeat_start => |rep| {
+                switch(rep.max) {
+                    .bounded => {
+                        try out_interface.print("REP_START({d}, {d}, {s})\n", .{rep.min, rep.max.bounded, @tagName(rep.mode)});
+                    },
+                    .unbounded => {
+                        try out_interface.print("REP_START({d}, inf, {s})\n", .{rep.min, @tagName(rep.mode)});
+                    }
+                }
+            },
+            .repeat_end => {
+                try out_interface.print("REP_END\n", .{});
+            },
+            .class => |class_binary| {
+                try out_interface.print("CLASS(", .{});
+                try regex_gen_util.print_binary(allocator, out_interface, class_binary);
+                try out_interface.print(")\n", .{});
             },
             .end_match => {
                 try out_interface.print("MATCH\n", .{});
@@ -180,7 +206,7 @@ pub fn readOutBytecode(out_interface: anytype, bytecode: []Instruction) !void {
     }
 }
 
-fn emitLabel(allocator: anytype, labels: *std.ArrayList(usize), out_interface: anytype, instruction_ptr: *usize) !void {
+fn emitLabel(allocator: anytype, labels: *std.ArrayList(usize), out_interface: anytype, instruction_ptr: *usize) !void { // Emits a jump reference label at the current instruction pointer.
     try labels.append(allocator, instruction_ptr.*);
     _ = out_interface;
     // try out_interface.print("LABEL {d}\n", .{labels.items.len - 1});
@@ -221,20 +247,17 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .literal = leaf }, instruction_ptr);
         },
         .repetition => |rep| {
-            switch (rep.reps.max) {
-                .bounded => {
-                },
-                .unbounded => {
-                },
-            }
+            _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{.repeat_start = .{.min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type}}, instruction_ptr);
             try emitRecursive(allocator, labels, instructions, fixups, out_interface, rep.child, show_match_width, instruction_ptr, recursion_level + 1);
+            _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .repeat_end, instruction_ptr);
+            try emitLabel(allocator, labels, out_interface, instruction_ptr);
         },
         .alternation => |alt| {
             var jmp_end_indices = try std.ArrayList(usize).initCapacity(allocator, 2);
             defer jmp_end_indices.deinit(allocator);
             for (0..alt.parts.len-1) |i| {
                 try emitLabel(allocator, labels, out_interface, instruction_ptr);
-                const split_index = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{.split = .{.left = labels.items.len, .right = 0}}, instruction_ptr); // fix this.
+                const split_index = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{.split = .{.left = labels.items.len, .right = 0}}, instruction_ptr);
                 try emitLabel(allocator, labels, out_interface, instruction_ptr);
                 try emitRecursive(allocator, labels, instructions, fixups, out_interface, alt.parts[i], show_match_width, instruction_ptr, recursion_level + 1);
                 try jmp_end_indices.append(allocator, try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .jmp = 0 }, instruction_ptr));
@@ -245,7 +268,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             try emitRecursive(allocator, labels, instructions, fixups, out_interface, alt.parts[alt.parts.len-1], show_match_width, instruction_ptr, recursion_level + 1);
             try jmp_end_indices.append(allocator, try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .jmp = 0 }, instruction_ptr));
             for (0..jmp_end_indices.items.len) |i| {
-                instructions.items[jmp_end_indices.items[i]].jmp = labels.items.len;
+                instructions.items[jmp_end_indices.items[i]].jmp = labels.items.len; // Have every alternation jump to the end when complete.
             }
         },
         .group => |grp| {
@@ -304,7 +327,6 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                             }
                         }
                     }
-                    // try emitRecursive(allocator, labels, instructions, fixups, out_interface, grp.expr, show_match_width, instruction_ptr, recursion_level + 1);
                 },
             }
         },
@@ -314,9 +336,42 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             }
         },
         .class => |class_item| {
-            // for (0..class_item.items.len) |i| {
-            //     _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .literal = class_item.items[i] }, instruction_ptr);
-            // }
+            const ALPHA_MASK: u256 = ((2<<26)-1)<<'a' | ((2<<26)-1)<<'A';
+            const DIGIT_MASK: u256 = ((2<<10)-1)<<'0';
+            const ALPHANUM_MASK: u256 = ALPHA_MASK | DIGIT_MASK;
+            const WHITESPACE_MASK: u256 = 1<<' ' | 1<<'\n' | 1<<'\t';
+            var accepted_chars: u256 = 0;
+            for (0..class_item.items.len) |i| { // Encode each item into the bitmask.
+                var mask_change_val: u256 = undefined;
+                switch(class_item.items[i].leaf_atom) {
+                    .generic => |gen| {
+                        mask_change_val = @as(u256,1)<<gen;
+                    },
+                    .digit => {
+                        mask_change_val = DIGIT_MASK;
+                    },
+                    .word => {
+                        mask_change_val = ALPHANUM_MASK;
+                    },
+                    .word_boundary, .start_anchor, .end_anchor, .any => {
+                        return core_regex_types.BytecodeGenError.InvalidClassMember;
+                    },
+                    .whitespace => {
+                        mask_change_val = WHITESPACE_MASK;
+                    },
+                    .range => |range| {
+                        mask_change_val = ((@as(u256, 2)<<(range.character_max-range.character_min))-1)<<range.character_min;
+                    },
+                }
+                if (class_item.items[i].inverted) {
+                    mask_change_val = ~mask_change_val;
+                }
+                accepted_chars |= mask_change_val;
+            }
+            if (class_item.negated) {
+                accepted_chars = ~accepted_chars;
+            }
+            _ = try emitInstruction(out_interface, allocator, labels, instructions, fixups, .{ .class = accepted_chars }, instruction_ptr);
         },
         .epsilon => {
         },

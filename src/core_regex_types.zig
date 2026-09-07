@@ -115,7 +115,7 @@ pub const LeafAtomNode = struct {
         any: void,
         range: struct { // For ranges within char classes. Cannot contain metacharacters.
             character_min: u8,
-        character_max: u8,
+            character_max: u8,
         },
     },
     inverted: bool,
@@ -253,4 +253,5 @@ pub const ParsingError = error{
 
 pub const BytecodeGenError = error{
     InvalidGroupID,
+    InvalidClassMember,
 };
