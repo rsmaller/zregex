@@ -9,21 +9,21 @@ fn setGroupIDs(ast: *core_regex_types.ASTNode, id: *usize) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             switch(grp.type) {
-            .capturing => {
-                ast.group.id = id.*;
-                id.* += 1;
-            },
-            .non_capturing => {
-                ast.group.id = null;
+                .capturing => {
+                    ast.group.id = id.*;
+                    id.* += 1;
+                },
+                .non_capturing => {
+                    ast.group.id = null;
+                }
             }
-        }
             try setGroupIDs(grp.expr, id);
         }, // outside of group, just recurse.
         .alternation => |alt| {
-        for (alt.parts) |item| {
-            try setGroupIDs(item, id);
-        }
-    },
+            for (alt.parts) |item| {
+                try setGroupIDs(item, id);
+            }
+        },
         .concatenation => |concat| {
             for (concat.parts) |item| {
                 try setGroupIDs(item, id);
@@ -218,52 +218,52 @@ fn trimAST(ast: *core_regex_types.ASTNode, allocator: anytype) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             if (grp.negated) {
+                switch(grp.type) {
+                    .capturing => {
+                        return core_regex_types.ParsingError.TokenNotFound;
+                    },
+                    .non_capturing => |non_capt| {
+                        switch(non_capt) {
+                            .atomic, .generic => {
+                                return core_regex_types.ParsingError.TokenNotFound;
+                            },
+                            else => {},
+                        }
+                    }
+                }
+            }
             switch(grp.type) {
-                .capturing => {
-                    return core_regex_types.ParsingError.TokenNotFound;
-                },
+                .capturing => {},
                 .non_capturing => |non_capt| {
                     switch(non_capt) {
-                        .atomic, .generic => {
-                            return core_regex_types.ParsingError.TokenNotFound;
+                        .lookbehind => {
+                            const len = matchRequirementRange(grp.expr);
+                            switch(len.max) {
+                                .unbounded => {
+                                    return core_regex_types.ParsingError.VariableLookbehindRange;
+                                },
+                                .bounded => {
+                                    if (len.max.bounded != len.min) {
+                                        return core_regex_types.ParsingError.VariableLookbehindRange;
+                                    }
+                                    ast.group.type.non_capturing.lookbehind = len.max.bounded;
+                                }
+                            }
                         },
                         else => {},
                     }
                 }
             }
-        }
-        switch(grp.type) {
-            .capturing => {},
-            .non_capturing => |non_capt| {
-                switch(non_capt) {
-                    .lookbehind => {
-                        const len = matchRequirementRange(grp.expr);
-                        switch(len.max) {
-                            .unbounded => {
-                                return core_regex_types.ParsingError.VariableLookbehindRange;
-                            },
-                            .bounded => {
-                                if (len.max.bounded != len.min) {
-                                    return core_regex_types.ParsingError.VariableLookbehindRange;
-                                }
-                                ast.group.type.non_capturing.lookbehind = len.max.bounded;
-                            }
-                        }
-                    },
-                    else => {},
-                }
-            }
-        }
-        try trimAST(grp.expr, allocator);
+            try trimAST(grp.expr, allocator);
         }, // outside of group, just recurse.
         .alternation => {
-        const old_alt_parts = ast.alternation.parts;
-        ast.alternation.parts = try removeDuplicates(allocator, ast.alternation.parts);
-        allocator.free(old_alt_parts);
-        for (ast.alternation.parts) |item| {
-            try trimAST(item, allocator); // recurse after trimming.
-            }
-    },
+            const old_alt_parts = ast.alternation.parts;
+            ast.alternation.parts = try removeDuplicates(allocator, ast.alternation.parts);
+            allocator.free(old_alt_parts);
+            for (ast.alternation.parts) |item| {
+                try trimAST(item, allocator); // recurse after trimming.
+                }
+        },
         .concatenation => |concat| {
             for (concat.parts) |item| {
                 try trimAST(item, allocator);
@@ -399,7 +399,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
         const result: *core_regex_types.ASTNode = try allocator.create(core_regex_types.ASTNode);
-        errdefer allocator.destroy(result); // Only defers inside this if statement.
+        errdefer destroyAST(allocator, result) catch @panic("Can't free AST after error!"); // Only defers inside this if statement.
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
             i.* += 3; // consume ?<=
@@ -423,7 +423,8 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                     .type = .{
                         .non_capturing = .{.lookbehind = 0},
                     },
-                    .negated = true}
+                    .negated = true
+                }
             };
         } else if (str_to_parse[i.* + 1] == '<') {
             var j: usize = i.* + 2;
@@ -559,16 +560,16 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         }
         } else { // otherwise, do regular group.
             result.* = .{
-            .group = .{
-                .expr = try parseExpr(allocator, str_to_parse, i),
-                .name = null,
-                .id = 0,
-                .type = .{
-                    .capturing = .generic
-                },
-                .negated = false
-            }
-        };
+                .group = .{
+                    .expr = try parseExpr(allocator, str_to_parse, i),
+                    .name = null,
+                    .id = 0,
+                    .type = .{
+                        .capturing = .generic
+                    },
+                    .negated = false
+                }
+            };
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
             try destroyAST(allocator, result.group.expr);
@@ -749,13 +750,11 @@ fn isEscapedMetacharacter(character: u8) bool {
 fn assertRepetitionAllowance(atom: *core_regex_types.ASTNode) !void {
     switch (atom.*) { // Validate that node is allowed to be repeated.
         .group => |grp| {
-        switch(grp.type) {
-            .non_capturing => {
-                return core_regex_types.ParsingError.TokenNotFound;
-            },
-            else => {},
-        }
-    },
+            switch(grp.type) {
+                .non_capturing => {},
+                else => {},
+            }
+        },
         .epsilon, .repetition, => {
             return core_regex_types.ParsingError.TokenNotFound;
         },
@@ -883,8 +882,7 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!core_re
             'r' => {
                 char_to_set = '\r';
             },
-            ']' => {
-            },
+            ']' => {}, // Here for explicitness; already handled in the char_to_set assignment line.
             'd' => {
                 if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
                     return core_regex_types.ParsingError.TokenNotFound;
@@ -924,19 +922,19 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!core_re
             'b', 'B' => { // Not allowed at all in char classes.
                 return core_regex_types.ParsingError.TokenNotFound;
             },
-            else => {},
+            else => {}, // Exhaustive switching requirement.
         }
     }
     escaped = false;
     if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') { // Range syntax.
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.* + 2] == ']') { // Return so that '-' is interpreted as a character at the end.
             return .{
-        .leaf_atom = .{
-            .generic = char_to_set
-        },
-        .inverted = false
-    };
-    }
+                .leaf_atom = .{
+                    .generic = char_to_set
+                },
+                .inverted = false
+            };
+        }
         i.* += 2; // Skip past current item and -.
         if (i.* >= str_to_parse.len) {
             return core_regex_types.ParsingError.EndOfString;
@@ -1060,10 +1058,10 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNod
     if (show_match_width) {
         switch (len.max) {
             .bounded => {
-                try out_interface.print("[Requisite match width is {d} - {d}] ", .{len.min, len.max.bounded});
+                try out_interface.print("[Requisite match width is {d} - {d}]\n", .{len.min, len.max.bounded});
             },
             .unbounded => {
-                try out_interface.print("[Requisite match width is {d} - inf] ", .{len.min});
+                try out_interface.print("[Requisite match width is {d} - inf]\n", .{len.min});
             },
         }
     }

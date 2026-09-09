@@ -18,7 +18,6 @@ pub fn print_binary(allocator: anytype, out_interface: anytype, binval: anytype)
                 try out_interface.print("0", .{});
             }
             if (items.items.len > 1) {
-                std.debug.print("LENGTHHHH: {d}, datasize: {d}\n", .{items.items.len, datasize});
                 var x = items.items.len-1;
                 while (x > 0) {
                     try out_interface.print("{d}", .{items.items[x]});
