@@ -1050,18 +1050,18 @@ fn printLeafAtom(out_interface: anytype, leaf: core_regex_types.LeafAtomNode) !v
     }
 }
 
-fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNode, show_match_width: bool, recursion_level: usize) !void {
+fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNode, options: core_regex_types.ASTPrintOptions, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
     const len: core_regex_types.RepetitionRangeType = matchRequirementRange(ast);
-    if (show_match_width) {
+    if (options.show_match_width) {
         switch (len.max) {
             .bounded => {
-                try out_interface.print("[Requisite match width is {d} - {d}]\n", .{len.min, len.max.bounded});
+                try out_interface.print("[Requisite match width is {d} - {d}] -> ", .{len.min, len.max.bounded});
             },
             .unbounded => {
-                try out_interface.print("[Requisite match width is {d} - inf]\n", .{len.min});
+                try out_interface.print("[Requisite match width is {d} - inf] -> ", .{len.min});
             },
         }
     }
@@ -1078,12 +1078,12 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNod
                     try out_interface.print("REPETITION(min = {}, max = inf, type = {s})\n", .{rep.reps.min, @tagName(rep.rep_type)});
                 },
             }
-            try printASTRecursive(out_interface, rep.child, show_match_width, recursion_level + 1);
+            try printASTRecursive(out_interface, rep.child, options, recursion_level + 1);
         },
         .alternation => |alt| {
             try out_interface.print("ALTERNATION()\n", .{});
             for (0..alt.parts.len) |i| {
-                try printASTRecursive(out_interface, alt.parts[i], show_match_width, recursion_level + 1);
+                try printASTRecursive(out_interface, alt.parts[i], options, recursion_level + 1);
             }
         },
         .group => |grp| {
@@ -1097,12 +1097,12 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNod
                 },
             }
             try out_interface.print("negated = {})\n", .{grp.negated});
-            try printASTRecursive(out_interface, grp.expr, show_match_width, recursion_level + 1);
+            try printASTRecursive(out_interface, grp.expr, options, recursion_level + 1);
         },
         .concatenation => |concat| {
             try out_interface.print("CONCATENATION()\n", .{});
             for (0..concat.parts.len) |i| {
-                try printASTRecursive(out_interface, concat.parts[i], show_match_width, recursion_level + 1);
+                try printASTRecursive(out_interface, concat.parts[i], options, recursion_level + 1);
             }
         },
         .class => |class_item| {
@@ -1120,10 +1120,8 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNod
     }
 }
 
-pub fn printAST(out_interface: anytype, pattern: zregex.Pattern, show_match_width: bool) !void {
-    if (pattern.ast) |ast| {
-        try printASTRecursive(out_interface, ast, show_match_width, 0);
-    }
+pub fn printAST(out_interface: anytype, ast: core_regex_types.AST, options: core_regex_types.ASTPrintOptions) !void {
+    try printASTRecursive(out_interface, ast, options, 0);
 }
 
 pub fn destroyAST(allocator: anytype, pattern: core_regex_types.AST) !void {

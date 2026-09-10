@@ -1,5 +1,11 @@
+// The core file which contains the primary types for parser-generated ASTs and errors, parsing or otherwise.
+const std = @import("std");
 const regex_type_reflection = @import("regex_type_reflection.zig");
 pub const AST = *const ASTNode;
+
+pub const ASTPrintOptions = struct {
+    show_match_width: bool = false,
+};
 
 pub const RepeaterType = enum {
     greedy,
@@ -120,6 +126,9 @@ pub const LeafAtomNode = struct {
     },
     inverted: bool,
     pub fn equals(self: *const LeafAtomNode, other: LeafAtomNode) bool {
+        if (std.meta.activeTag(self.leaf_atom) != std.meta.activeTag(other.leaf_atom)) {
+            return false;
+        }
         switch (self.leaf_atom) {
             .generic => |chr| {
                 if (chr != other.leaf_atom.generic) {
@@ -199,49 +208,49 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     epsilon: void, // Generic empty node.
     pub fn equals(self: *const ASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
         comptime {
-    if (regex_type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
-        @compileError("Type of other node for comparison between ASTNode must also be a ASTNode or *ASTNode");
+            if (regex_type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
+                @compileError("Type of other node for comparison between ASTNode must also be a ASTNode or *ASTNode");
+            }
+        }
+        const other_unwrapped_pointer: ASTNode = regex_type_reflection.unwrapPointer(other);
+        if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
+            return false;
+        }
+        switch (self.*) {
+            .leaf_atom => {
+                if (!self.leaf_atom.equals(other_unwrapped_pointer.leaf_atom)) {
+                    return false;
+                }
+            },
+            .alternation => |alt| {
+                if (!alt.equals(other_unwrapped_pointer.alternation)) {
+                    return false;
+                }
+            },
+            .concatenation => |concat| {
+                if (!concat.equals(other_unwrapped_pointer.concatenation)) {
+                    return false;
+                }
+            },
+            .group => |grp| {
+                if (!grp.equals(other_unwrapped_pointer.group)) {
+                    return false;
+                }
+            },
+            .repetition => |rep| {
+                if (!rep.equals(other_unwrapped_pointer.repetition)) {
+                    return false;
+                }
+            },
+            .class => |classItem| {
+                if (!classItem.equals(other_unwrapped_pointer.class)) {
+                    return false;
+                }
+            },
+            .epsilon => {}, // Epsilons contain no data and are always the same.
+        }
+        return true;
     }
-}
-    const other_unwrapped_pointer: ASTNode = regex_type_reflection.unwrapPointer(other);
-    if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
-        return false;
-    }
-    switch (self.*) {
-        .leaf_atom => {
-            if (!self.leaf_atom.equals(other_unwrapped_pointer.leaf_atom)) {
-                return false;
-            }
-        },
-        .alternation => |alt| {
-            if (!alt.equals(other_unwrapped_pointer.alternation)) {
-                return false;
-            }
-        },
-        .concatenation => |concat| {
-            if (!concat.equals(other_unwrapped_pointer.concatenation)) {
-                return false;
-            }
-        },
-        .group => |grp| {
-            if (!grp.equals(other_unwrapped_pointer.group)) {
-                return false;
-            }
-        },
-        .repetition => |rep| {
-            if (!rep.equals(other_unwrapped_pointer.repetition)) {
-                return false;
-            }
-        },
-        .class => |classItem| {
-            if (!classItem.equals(other_unwrapped_pointer.class)) {
-                return false;
-            }
-        },
-        .epsilon => {}, // Epsilons contain no data and are always the same.
-            }
-    return true;
-}
 };
 
 pub const ParsingError = error{

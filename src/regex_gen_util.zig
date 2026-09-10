@@ -1,7 +1,8 @@
 const std = @import("std");
 const regex_type_reflection = @import("regex_type_reflection.zig");
 
-pub fn print_binary(allocator: anytype, out_interface: anytype, binval: anytype) !void { // Accepts an integer and prints out its binary with the respective width.
+
+pub fn print_binary(allocator: anytype, out_interface: anytype, binval: anytype, options: struct{show_leading_zeroes: bool = false}) !void { // Accepts an integer and prints out its binary with the respective width.
     const T =   @TypeOf(binval);
     const info = @typeInfo(T);
     switch(info) {
@@ -13,9 +14,11 @@ pub fn print_binary(allocator: anytype, out_interface: anytype, binval: anytype)
                 next >>= 1;
             }
             const datasize = @sizeOf(T) * 8;
-            const leading_zeroes = datasize - items.items.len;
-            for (0..leading_zeroes) |_| {
-                try out_interface.print("0", .{});
+            if (options.show_leading_zeroes) {
+                const leading_zeroes = datasize - items.items.len;
+                for (0..leading_zeroes) |_| {
+                    try out_interface.print("0", .{});
+                }
             }
             if (items.items.len > 1) {
                 var x = items.items.len-1;

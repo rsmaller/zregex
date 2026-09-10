@@ -15,24 +15,16 @@ pub fn main() !void {
 
     // const pattern: []const u8 = "(?<=abc|ab)(?<name1>hiii)(|a|b|c|a|)\\ba \\B [\\q-\\z]^\\[\\*\\..(?>abc)\\n(|)(?=\\s{3,}+|)(?!\\s{3,}+|)(?<=az)[^\\t-\\n](?<!az)[abc]+?-(|\\d{,5})-(\\d{,}|-\\d{15})$";
     // const pattern: []const u8 = "[((((abcd)))))](?<=abc)(?<name1>hiii)(|a|b|c|a|)\\ba \\B [\\q-\\z]^\\[\\*\\..(?>abc)\\n(|)(?=\\s{3,}+|)(?!\\s{3,}+|)(?<=az)[^\\t-\\n](?<!az)[abc]+?-(|\\d{,5})-(\\d{,}|-\\d{15})$";
-    // const pattern: []const u8 = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
-    const pattern = "[abc]";
-    const regexAST = try zregex.compile(allocator, pattern);
+    const pattern: []const u8 = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
+    // const pattern = "[abc]";
+    const compiledPattern = try zregex.compile(allocator, pattern);
+    defer zregex.destroyPattern(allocator, compiledPattern) catch @panic("Could not free compiled pattern!");
     try stdout.print("Pattern: {s}\n", .{pattern});
-    try stdout.flush();
-
-
-    if (regexAST.ast) |ast| {
+    if (compiledPattern.ast) |ast| {
         try stdout.print("AST:\n", .{});
-        try zregex.printAST(stdout, regexAST, true);
-        const result = try zregex.regex_bytecode.emit(allocator, ast);
+        try zregex.printAST(stdout, ast, .{.show_match_width = true});
         try stdout.print("\nBytecode:\n", .{});
-        try zregex.regex_bytecode.readOutBytecode(allocator, stdout, result);
-        defer allocator.free(result);
-
+        try zregex.printBytecode(allocator, stdout, compiledPattern.bytecode);
     }
-
     try stdout.flush(); // Don't forget to flush!
-
-    try zregex.destroyPattern(allocator, regexAST);
 }

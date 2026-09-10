@@ -2,7 +2,7 @@ const std = @import("std");
 const core_regex_types = @import("core_regex_types.zig");
 const regex_gen_util = @import("regex_gen_util.zig");
 
-const Instruction = union(enum) {
+pub const Instruction = union(enum) {
     split: struct {
         left: usize,
         right: usize,
@@ -146,7 +146,7 @@ pub fn readOutBytecode(allocator: anytype, out_interface: anytype, bytecode: []I
             },
             .class => |class_binary| {
                 try out_interface.print("CLASS(", .{});
-                try regex_gen_util.print_binary(allocator, out_interface, class_binary);
+                try regex_gen_util.print_binary(allocator, out_interface, class_binary, .{.show_leading_zeroes = false});
                 try out_interface.print(")\n", .{});
             },
             .end_match => {
