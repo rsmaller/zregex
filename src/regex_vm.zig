@@ -1,2 +1,77 @@
 const std = @import("std");
+const core_regex_types = @import("core_regex_types.zig");
+const regex_bytecode = @import("regex_bytecode.zig");
 
+pub const Match = struct {
+    // groups: []const []const u8,
+};
+
+const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction.
+    min: usize,
+    max: core_regex_types.RepetitionBoundType,
+    mode: core_regex_types.RepeaterType,
+};
+
+const StackFrame = union(enum) {
+    repeat: RepeatStackFrame,
+    // choice_point for backtracking later.
+
+};
+
+fn Stack(T: type) type {
+    return struct {
+        data: []T,
+        size: usize,
+        fn init(allocator: anytype) !Stack(T) {
+            return .{
+                .data = try allocator.alloc(T, 4),
+                .size = 0,
+            };
+        }
+        fn deinit(self: *@This(), allocator: anytype) void {
+            allocator.free(self.data);
+        }
+        fn push(self: *@This(), allocator: anytype, item: T) !void {
+            if (self.size >= self.data.len / 2) { // Dynamic doubling of array.
+                self.data = try allocator.realloc(self.data, self.data.len * 2);
+            }
+            self.data[self.size] = item;
+            self.size += 1;
+        }
+        fn pop(self: *@This(), allocator: anytype) !T {
+            if (self.size == 0) {
+                return core_regex_types.StackError.StackEmptyError;
+            }
+            self.size -= 1;
+            const ret: T = self.data[self.size];
+            if (self.size <= self.data.len / 4) { // Dynamic halving of array.
+                self.data = try allocator.realloc(self.data, self.data.len / 2);
+            }
+            return ret;
+        }
+        fn peek(self: *@This()) !T {
+            if (self.size == 0) {
+                return core_regex_types.StackError.StackEmptyError;
+            }
+            return self.data[self.size - 1];
+        }
+    };
+}
+
+const VMMainStack = Stack(StackFrame);
+
+pub fn match(allocator: anytype, bytecode: []regex_bytecode.Instruction, string: []const u8) !Match {
+    // VM contents.
+    var main_stack = try VMMainStack.init(allocator);
+    defer main_stack.deinit(allocator);
+    var group_index_stack = try Stack(usize).init(allocator);
+    try group_index_stack.push(allocator, 0); // Push group index 0 as main match in stack.
+    defer group_index_stack.deinit(allocator);
+    var ip: usize = 0;
+    ip = ip;
+
+    // Matching contents.
+    _ = bytecode;
+    _ = string;
+    return Match{};
+}

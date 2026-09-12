@@ -264,3 +264,7 @@ pub const BytecodeGenError = error{
     InvalidGroupID,
     InvalidClassMember,
 };
+
+pub const StackError = error {
+    StackEmptyError,
+};
