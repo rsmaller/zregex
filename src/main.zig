@@ -1,12 +1,17 @@
 const std = @import("std");
 const zregex = @import("zregex");
+const builtin = @import("builtin");
 
 pub fn main(init: std.process.Init) !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const fixed_alloc_buffer_size: comptime_int = if (comptime builtin.mode == .Debug) 0 else 65535;
+    var fixed_alloc_buffer: [fixed_alloc_buffer_size]u8 = undefined;
+    var AllocatorBackend = if (comptime builtin.mode == .Debug) std.heap.DebugAllocator(.{}){} else std.heap.FixedBufferAllocator.init(&fixed_alloc_buffer);
+    const allocator = AllocatorBackend.allocator();
+    std.debug.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});
+    std.debug.print("Size of fixed alloc buffer: {d}\n", .{fixed_alloc_buffer.len});
     defer {
-        if (gpa.deinit() != .ok) {
-            @panic("Leak detected!");
+        if (comptime zregex.type_reflection.declExists(@TypeOf(allocator), "deinit", std.builtin.Type.Fn)) {
+            _ = allocator.deinit();
         }
     }
     var stdout_buffer: [1024]u8 = undefined;
@@ -20,12 +25,12 @@ pub fn main(init: std.process.Init) !void {
     const compiledPattern = try zregex.compile(allocator, pattern);
     defer zregex.destroyPattern(allocator, compiledPattern) catch @panic("Could not free compiled pattern!");
     try stdout.print("Pattern: {s}\n", .{pattern});
-    // if (compiledPattern.ast) |ast| {
-    //     try stdout.print("AST:\n", .{});
-    //     try zregex.printAST(stdout, ast, .{.show_match_width = true});
-    //     try stdout.print("\nBytecode:\n", .{});
-    //     try zregex.printBytecode(allocator, stdout, compiledPattern.bytecode);
-    // }
+    if (compiledPattern.ast) |ast| {
+        try stdout.print("AST:\n", .{});
+        try zregex.printAST(stdout, ast, .{.show_match_width = true});
+        try stdout.print("\nBytecode:\n", .{});
+        try zregex.printBytecode(allocator, stdout, compiledPattern.bytecode);
+    }
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});
     const myMatch = try compiledPattern.match(allocator, string_to_match);
     _ = myMatch;

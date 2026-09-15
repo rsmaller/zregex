@@ -1,6 +1,6 @@
 const std = @import("std");
-const core_regex_types = @import("core_regex_types.zig");
-const regex_gen_util = @import("regex_gen_util.zig");
+const core_types = @import("core_types.zig");
+const gen_util = @import("gen_util.zig");
 
 pub const Instruction = union(enum) {
     split: struct {
@@ -9,12 +9,12 @@ pub const Instruction = union(enum) {
     },
     repeat_start: struct {
         min: usize,
-        max: core_regex_types.RepetitionBoundType,
-        mode: core_regex_types.RepeaterType,
+        max: core_types.RepetitionBoundType,
+        mode: core_types.RepeaterType,
     },
     repeat_end: void,
     jmp: usize,
-    literal: core_regex_types.LeafAtomNode,
+    literal: core_types.LeafAtomNode,
     end_match: void,
     capture_start: usize,
     capture_end: usize,
@@ -31,7 +31,7 @@ pub const Instruction = union(enum) {
     class: u256, // binary-optimized for every 8-bit character.
 };
 
-pub fn emit(allocator: anytype, ast: *const core_regex_types.ASTNode) ![]Instruction {
+pub fn emit(allocator: anytype, ast: *const core_types.ASTNode) ![]Instruction {
     var labels: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
     defer labels.deinit(allocator);
     var fixups: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
@@ -87,7 +87,7 @@ fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(Instruction)
 }
 
 fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(Instruction),
-    fixups: *std.ArrayList(usize), ast: *const core_regex_types.ASTNode, instruction_ptr: *usize,
+    fixups: *std.ArrayList(usize), ast: *const core_types.ASTNode, instruction_ptr: *usize,
     recursion_level: usize) !void {
     switch (ast.*) {
         .leaf_atom => |leaf| {
@@ -128,7 +128,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         try emitLabel(allocator, labels, instruction_ptr);
                         _ = try emitInstruction(allocator, instructions, fixups, .{ .capture_end =  id }, instruction_ptr);
                     } else {
-                        return core_regex_types.BytecodeGenError.InvalidGroupID;
+                        return core_types.BytecodeGenError.InvalidGroupID;
                     }
                 },
                 .non_capturing => |grp_type| {
@@ -200,7 +200,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         mask_change_val = ALPHANUM_MASK;
                     },
                     .word_boundary, .start_anchor, .end_anchor, .any => {
-                        return core_regex_types.BytecodeGenError.InvalidClassMember;
+                        return core_types.BytecodeGenError.InvalidClassMember;
                     },
                     .whitespace => {
                         mask_change_val = WHITESPACE_MASK;

@@ -1,6 +1,6 @@
 const std = @import("std");
-const core_regex_types = @import("core_regex_types.zig");
-const regex_bytecode = @import("regex_bytecode.zig");
+const core_types = @import("core_types.zig");
+const codegen = @import("codegen.zig");
 
 pub const Match = struct {
     // groups: []const []const u8,
@@ -8,8 +8,8 @@ pub const Match = struct {
 
 const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction.
     min: usize,
-    max: core_regex_types.RepetitionBoundType,
-    mode: core_regex_types.RepeaterType,
+    max: core_types.RepetitionBoundType,
+    mode: core_types.RepeaterType,
 };
 
 const StackFrame = union(enum) {
@@ -40,7 +40,7 @@ fn Stack(T: type) type {
         }
         fn pop(self: *@This(), allocator: anytype) !T {
             if (self.size == 0) {
-                return core_regex_types.StackError.StackEmptyError;
+                return core_types.StackError.StackEmptyError;
             }
             self.size -= 1;
             const ret: T = self.data[self.size];
@@ -51,7 +51,7 @@ fn Stack(T: type) type {
         }
         fn peek(self: *@This()) !T {
             if (self.size == 0) {
-                return core_regex_types.StackError.StackEmptyError;
+                return core_types.StackError.StackEmptyError;
             }
             return self.data[self.size - 1];
         }
@@ -60,7 +60,7 @@ fn Stack(T: type) type {
 
 const VMMainStack = Stack(StackFrame);
 
-pub fn match(allocator: anytype, bytecode: []regex_bytecode.Instruction, string: []const u8) !Match {
+pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []const u8) !Match {
     // VM contents.
     var main_stack = try VMMainStack.init(allocator);
     defer main_stack.deinit(allocator);

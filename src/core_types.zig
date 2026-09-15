@@ -1,6 +1,6 @@
 // The core file which contains the primary types for parser-generated ASTs and errors, parsing or otherwise.
 const std = @import("std");
-const regex_type_reflection = @import("regex_type_reflection.zig");
+const type_reflection = @import("type_reflection.zig");
 pub const AST = *const ASTNode;
 
 pub const ASTPrintOptions = struct {
@@ -208,11 +208,11 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     epsilon: void, // Generic empty node.
     pub fn equals(self: *const ASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
         comptime {
-            if (regex_type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
+            if (type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
                 @compileError("Type of other node for comparison between ASTNode must also be a ASTNode or *ASTNode");
             }
         }
-        const other_unwrapped_pointer: ASTNode = regex_type_reflection.unwrapPointer(other);
+        const other_unwrapped_pointer: ASTNode = type_reflection.unwrapPointer(other);
         if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
             return false;
         }

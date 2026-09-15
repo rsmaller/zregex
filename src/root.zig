@@ -1,35 +1,35 @@
 const std = @import("std");
-pub const core_regex_types = @import("core_regex_types.zig");
-pub const regex_type_reflection = @import("regex_type_reflection.zig");
-pub const regex_parser = @import("regex_parser.zig");
-pub const regex_bytecode = @import("regex_bytecode.zig");
-pub const regex_gen_util = @import("regex_gen_util.zig");
-pub const regex_vm = @import("regex_vm.zig");
+pub const core_types = @import("core_types.zig");
+pub const type_reflection = @import("type_reflection.zig");
+pub const parser = @import("parser.zig");
+pub const codegen = @import("codegen.zig");
+pub const gen_util = @import("gen_util.zig");
+pub const vm = @import("vm.zig");
 
 pub const Pattern = struct {
-    ast: ?core_regex_types.AST,
-    bytecode: []regex_bytecode.Instruction,
+    ast: ?core_types.AST,
+    bytecode: []codegen.Instruction,
     pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !Match {
-        return try regex_vm.match(allocator, self.bytecode, string);
+        return try vm.match(allocator, self.bytecode, string);
     }
 };
 
-pub const Match = regex_vm.Match;
+pub const Match = vm.Match;
 
-pub const ASTPrintOptions = core_regex_types.ASTPrintOptions; // re-namespacing print options type for easier interfacing.
+pub const ASTPrintOptions = core_types.ASTPrintOptions; // re-namespacing print options type for easier interfacing.
 
 pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!Pattern {
-    const ast = try regex_parser.compile(allocator, str_to_parse);
+    const ast = try parser.compile(allocator, str_to_parse);
     return Pattern{
         .ast = ast,
-        .bytecode = try regex_bytecode.emit(allocator, ast),
+        .bytecode = try codegen.emit(allocator, ast),
     };
 }
 
-pub fn printAST(out_interface: anytype, ast: core_regex_types.AST, options: core_regex_types.ASTPrintOptions) !void {
+pub fn printAST(out_interface: anytype, ast: core_types.AST, options: core_types.ASTPrintOptions) !void {
     try printASTRecursive(out_interface, ast, options, 0);
 }
-pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []regex_bytecode.Instruction) !void {
+pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []codegen.Instruction) !void {
     for (0..bytecode.len) |i| {
         try out_interface.print("{d}:\t", .{i});
         switch(bytecode[i]) {
@@ -54,7 +54,7 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []reg
             },
             .class => |class_binary| {
                 try out_interface.print("CLASS(", .{});
-                try regex_gen_util.print_binary(allocator, out_interface, class_binary, .{.show_leading_zeroes = false});
+                try gen_util.print_binary(allocator, out_interface, class_binary, .{.show_leading_zeroes = false});
                 try out_interface.print(")\n", .{});
             },
             .end_match => {
@@ -105,17 +105,17 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []reg
 
 pub fn destroyPattern(allocator: anytype, pattern: Pattern) !void {
     if (pattern.ast) |ast| {
-        try regex_parser.destroyAST(allocator, ast);
+        try parser.destroyAST(allocator, ast);
     }
     allocator.free(pattern.bytecode);
 }
 
 // Internals.
-fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNode, options: core_regex_types.ASTPrintOptions, recursion_level: usize) !void {
+fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, options: core_types.ASTPrintOptions, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
-    const len: core_regex_types.RepetitionRangeType = regex_parser.matchRequirementRange(ast);
+    const len: core_types.RepetitionRangeType = parser.matchRequirementRange(ast);
     if (options.show_match_width) {
         switch (len.max) {
             .bounded => {
@@ -181,7 +181,7 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_regex_types.ASTNod
     }
 }
 
-fn printLeafAtom(out_interface: anytype, leaf: core_regex_types.LeafAtomNode) !void { // prints leaf of AST or bytecode.
+fn printLeafAtom(out_interface: anytype, leaf: core_types.LeafAtomNode) !void { // prints leaf of AST or bytecode.
     switch(leaf.leaf_atom) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;

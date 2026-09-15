@@ -51,10 +51,21 @@ pub fn IntrospectedTypeClass(T: type) type {
     };
 }
 
+pub fn declExists(comptime T: type, comptime name: []const u8, comptime decl_type: type) bool {
+    if (!@hasDecl(T, name)) {
+        return false;
+    }
+    const payload_type = IntrospectedTypeClass(@TypeOf(@field(T, name)));
+    if (payload_type != decl_type) {
+        return false;
+    }
+    return true;
+}
+
 pub fn assertDeclExists(comptime T: type, comptime name: []const u8, comptime decl_type: type) void { // Takes in a type from std.builtin.Type to assert a decl of a specific builtin type exists.
     if (!@hasDecl(T, name)) {
-        @compileError("Type " ++ @typeName(T) ++ " does not have the field " ++ name ++ ". Please make sure the field exists and is marked pub");
-    }
+    @compileError("Type " ++ @typeName(T) ++ " does not have the field " ++ name ++ ". Please make sure the field exists and is marked pub");
+}
     const payload_type = IntrospectedTypeClass(@TypeOf(@field(T, name)));
     if (payload_type != decl_type) {
         @compileError("Type " ++ @typeName(T) ++ " has field " ++ name ++ " but it is of type " ++ @typeName(payload_type) ++ " and not of type " ++ @typeName(decl_type));
