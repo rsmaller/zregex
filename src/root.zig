@@ -3,7 +3,7 @@ pub const core_types = @import("core_types.zig");
 pub const type_reflection = @import("type_reflection.zig");
 pub const parser = @import("parser.zig");
 pub const codegen = @import("codegen.zig");
-pub const gen_util = @import("gen_util.zig");
+pub const core_util = @import("core_util.zig");
 pub const vm = @import("vm.zig");
 
 pub const Pattern = struct {
@@ -54,7 +54,7 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
             },
             .class => |class_binary| {
                 try out_interface.print("CLASS(", .{});
-                try gen_util.print_binary(allocator, out_interface, class_binary, .{.show_leading_zeroes = false});
+                try core_util.print_binary(allocator, out_interface, class_binary, .{.show_leading_zeroes = false});
                 try out_interface.print(")\n", .{});
             },
             .end_match => {

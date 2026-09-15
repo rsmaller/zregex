@@ -1,6 +1,6 @@
 const std = @import("std");
 const core_types = @import("core_types.zig");
-const gen_util = @import("gen_util.zig");
+const core_util = @import("core_util.zig");
 
 pub const Instruction = union(enum) {
     split: struct {
