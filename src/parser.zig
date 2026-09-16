@@ -5,7 +5,7 @@ const core_types = @import("core_types.zig");
 
 var EPSILON_UNIT: core_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
-fn setGroupIDs(ast: *core_types.ASTNode, id: *usize) !void {
+pub fn setGroupIDs(ast: *core_types.ASTNode, id: *usize) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             switch(grp.type) {
@@ -214,7 +214,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     return try list.toOwnedSlice(allocator);
 }
 
-fn trimAST(ast: *core_types.ASTNode, allocator: anytype) !void {
+pub fn trimAST(ast: *core_types.ASTNode, allocator: anytype) !void {
     switch(ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             if (grp.negated) {
@@ -1081,7 +1081,7 @@ pub fn destroyAST(allocator: anytype, pattern: core_types.AST) !void {
     allocator.destroy(pattern);
 }
 
-pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!core_types.AST {
+pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!core_types.GroupSizedAST {
     var i: usize = 0;
     var j: usize = 1; // ID 0 is reserved for whole match.
     const ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
@@ -1093,5 +1093,5 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!core_types
     }
     try setGroupIDs(ast, &j);
     try trimAST(ast, allocator);
-    return ast;
+    return .{.ast = ast, .group_count = j};
 }

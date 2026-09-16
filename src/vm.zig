@@ -71,6 +71,7 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
 
     while (ip < bytecode.len) : (ip += 1) {
         switch (bytecode[ip]) {
+            .allocate_groups => {},
             .split => {},
             .repeat_start => {},
             .repeat_end => {},

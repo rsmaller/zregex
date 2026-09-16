@@ -1,7 +1,13 @@
 // The core file which contains the primary types for parser-generated ASTs and errors, parsing or otherwise.
 const std = @import("std");
 const type_reflection = @import("type_reflection.zig");
+
 pub const AST = *const ASTNode;
+
+pub const GroupSizedAST = struct {
+    ast: AST,
+    group_count: usize,
+};
 
 pub const ASTPrintOptions = struct {
     show_match_width: bool = false,
@@ -253,16 +259,17 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     }
 };
 
-pub const ParsingError = error{
+pub const ParsingError = error {
     TokenNotFound,
     EndOfString,
     InvalidRange,
     VariableLookbehindRange,
 };
 
-pub const BytecodeGenError = error{
+pub const BytecodeGenError = error {
     InvalidGroupID,
     InvalidClassMember,
+    InvalidTypeConversion,
 };
 
 pub const StackError = error {

@@ -19,10 +19,10 @@ pub const Match = vm.Match;
 pub const ASTPrintOptions = core_types.ASTPrintOptions; // re-namespacing print options type for easier interfacing.
 
 pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!Pattern {
-    const ast = try parser.compile(allocator, str_to_parse);
+    const sized_ast = try parser.compile(allocator, str_to_parse);
     return Pattern{
-        .ast = ast,
-        .bytecode = try codegen.emit(allocator, ast),
+        .ast = sized_ast.ast,
+        .bytecode = try codegen.emit(allocator, sized_ast.ast, sized_ast.group_count),
     };
 }
 
@@ -33,6 +33,9 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
     for (0..bytecode.len) |i| {
         try out_interface.print("{d}:\t", .{i});
         switch(bytecode[i]) {
+            .allocate_groups => |alloc| {
+                try out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size});
+            },
             .split => |spl| {
                 try out_interface.print("SPLIT({d}, {d})\n", .{spl.left, spl.right});
             },
@@ -42,15 +45,15 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
             .repeat_start => |rep| {
                 switch(rep.max) {
                     .bounded => {
-                        try out_interface.print("REP_START({d}, {d}, {s})\n", .{rep.min, rep.max.bounded, @tagName(rep.mode)});
+                        try out_interface.print("REP_START(min={d}, max={d}, {s})\n", .{rep.min, rep.max.bounded, @tagName(rep.mode)});
                     },
                     .unbounded => {
-                        try out_interface.print("REP_START({d}, inf, {s})\n", .{rep.min, @tagName(rep.mode)});
+                        try out_interface.print("REP_START(min={d}, max=inf, {s})\n", .{rep.min, @tagName(rep.mode)});
                     }
                 }
             },
-            .repeat_end => {
-                try out_interface.print("REP_END\n", .{});
+            .repeat_end => |rep_end| {
+                try out_interface.print("REP_END(jmp={d})\n", .{rep_end.repeat_start_jmp});
             },
             .class => |class_binary| {
                 try out_interface.print("CLASS(", .{});
@@ -61,13 +64,13 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
                 try out_interface.print("MATCH\n", .{});
             },
             .literal => |lit| {
-                try printLeafAtom(out_interface, lit);
+                try printLiteralInstruction(out_interface, lit);
             },
             .capture_start => |cap| {
-                try out_interface.print("CAP_START({d})\n", .{cap});
+                try out_interface.print("CAP_START(id={d})\n", .{cap});
             },
             .capture_end => |cap| {
-                try out_interface.print("CAP_END({d})\n", .{cap});
+                try out_interface.print("CAP_END(id={d})\n", .{cap});
             },
             .atomic_start => {
                 try out_interface.print("ATOMIC_START\n", .{});
@@ -82,7 +85,7 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
                 try out_interface.print("LOOKAHEAD_END\n", .{});
             },
             .lookbehind_start => |len| {
-                try out_interface.print("LOOKBEHIND_START({d})\n", .{len});
+                try out_interface.print("LOOKBEHIND_START(len={d})\n", .{len});
             },
             .lookbehind_end => {
                 try out_interface.print("LOOKBEHIND_END\n", .{});
@@ -94,7 +97,7 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
                 try out_interface.print("NEG_LOOKAHEAD_END\n", .{});
             },
             .neg_lookbehind_start => |len| {
-                try out_interface.print("NEG_LOOKBEHIND_START({d})\n", .{len});
+                try out_interface.print("NEG_LOOKBEHIND_START(len={d})\n", .{len});
             },
             .neg_lookbehind_end => {
                 try out_interface.print("NEG_LOOKBEHIND_END\n", .{});
@@ -177,6 +180,31 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, opt
         },
         .epsilon => {
             try out_interface.print("EPSILON()\n", .{});
+        },
+    }
+}
+
+fn printLiteralInstruction(out_interface: anytype, instruction: codegen.LiteralInstruction) !void { // prints leaf of AST or bytecode.
+    switch(instruction.data) {
+        .generic => |gen_leaf| {
+            var buf: [2]u8 = undefined;
+            if (gen_leaf == '\n') {
+                buf[0] = '\\';
+                buf[1] = 'n';
+            } else if (gen_leaf == '\t') {
+                buf[0] = '\\';
+                buf[1] = 't';
+            } else if (gen_leaf == '\r') {
+                buf[0] = '\\';
+                buf[1] = 'r';
+            } else {
+                buf[0] = gen_leaf;
+                buf[1] = 0;
+            }
+            try out_interface.print("LITERAL(char = {s})\n", .{buf});
+        },
+        else => {
+            try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{@tagName(instruction.data), instruction.inverted});
         },
     }
 }
