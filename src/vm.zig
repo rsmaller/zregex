@@ -68,10 +68,32 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
     try group_index_stack.push(allocator, 0); // Push group index 0 as main match in stack.
     defer group_index_stack.deinit(allocator);
     var ip: usize = 0;
-    ip = ip;
 
+    while (ip < bytecode.len) : (ip += 1) {
+        switch (bytecode[ip]) {
+            .split => {},
+            .repeat_start => {},
+            .repeat_end => {},
+            .jmp => {},
+            .literal => {},
+            .end_match => {},
+            .capture_start => {},
+            .capture_end => {},
+            .atomic_start => {},
+            .atomic_end => {},
+            .lookahead_start => {},
+            .lookahead_end => {},
+            .lookbehind_start => {},
+            .lookbehind_end => {},
+            .neg_lookahead_start => {},
+            .neg_lookahead_end => {},
+            .neg_lookbehind_start => {},
+            .neg_lookbehind_end => {},
+            .class => {},
+        }
+    }
     // Matching contents.
-    _ = bytecode;
     _ = string;
     return Match{};
 }
+
