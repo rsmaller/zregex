@@ -26,7 +26,7 @@ pub const RepetitionBoundType = union(enum) {
         if (@intFromEnum(self.*) != @intFromEnum(other)) {
             return false;
         }
-        switch(self.*) {
+        switch (self.*) {
             .bounded => |bound| {
                 if (bound != other.bounded) {
                     return false;
@@ -74,17 +74,14 @@ pub const GroupNode = struct {
     expr: *ASTNode,
     id: ?usize,
     name: ?[]const u8, // Not nested in GroupNode for simplicity.
-    type: union(enum) {
-        capturing: union(enum) {
-            generic,
-        },
-        non_capturing: union(enum) {
-            generic: void,
-            atomic: void,
-            lookahead: void,
-            lookbehind: usize,
-        }
-    },
+    type: union(enum) { capturing: union(enum) {
+        generic,
+    }, non_capturing: union(enum) {
+        generic: void,
+        atomic: void,
+        lookahead: void,
+        lookbehind: usize,
+    } },
     negated: bool,
     pub fn equals(self: *const GroupNode, other: GroupNode) bool {
         if (@intFromEnum(self.type) != @intFromEnum(other.type)) {
@@ -99,7 +96,7 @@ pub const GroupNode = struct {
         if (self.negated != other.negated) {
             return false;
         }
-        switch(self.type) {
+        switch (self.type) {
             .capturing => |capt| {
                 if (@intFromEnum(capt) != @intFromEnum(other.type.capturing)) {
                     return false;
@@ -109,7 +106,7 @@ pub const GroupNode = struct {
                 if (@intFromEnum(non_capt) != @intFromEnum(other.type.non_capturing)) {
                     return false;
                 }
-            }
+            },
         }
         return true;
     }
@@ -155,7 +152,7 @@ pub const LeafAtomNode = struct {
     }
 };
 
-pub const AlternationNode = struct{
+pub const AlternationNode = struct {
     parts: []*ASTNode,
     pub fn equals(self: *const AlternationNode, other: AlternationNode) bool {
         if (self.parts.len != other.parts.len) {
@@ -170,8 +167,8 @@ pub const AlternationNode = struct{
     }
 }; // Same as concatenation but semantically different and in a higher order function.
 
-pub const ConcatenationNode = struct{
-    parts: []*ASTNode,  // Operation chaining two characters together.
+pub const ConcatenationNode = struct {
+    parts: []*ASTNode, // Operation chaining two characters together.
     pub fn equals(self: *const ConcatenationNode, other: ConcatenationNode) bool {
         if (self.parts.len != other.parts.len) {
             return false;
@@ -259,19 +256,23 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     }
 };
 
-pub const ParsingError = error {
+pub const ParsingError = error{
     TokenNotFound,
     EndOfString,
     InvalidRange,
     VariableLookbehindRange,
 };
 
-pub const BytecodeGenError = error {
+pub const BytecodeGenError = error{
     InvalidGroupID,
     InvalidClassMember,
     InvalidTypeConversion,
 };
 
-pub const StackError = error {
+pub const StackError = error{
     StackEmptyError,
+};
+
+pub const VMError = error{
+    InvalidGroupAllocation,
 };

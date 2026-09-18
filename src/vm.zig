@@ -3,17 +3,27 @@ const core_types = @import("core_types.zig");
 const codegen = @import("codegen.zig");
 
 pub const Match = struct {
-    // groups: []const []const u8,
+    groups: []const MatchGroup,
 };
 
-const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction.
+pub const MatchGroup = struct {
+    data: []const u8, // Slices of original string passed in.
+};
+
+const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction. Unsure if needed.
     min: usize,
     max: core_types.RepetitionBoundType,
     mode: core_types.RepeaterType,
 };
 
+const ChoicePointStackFrame = struct {
+    backtrack_ip: usize,
+    stack_depth: usize,
+};
+
 const StackFrame = union(enum) {
     repeat: RepeatStackFrame,
+    choice_point: ChoicePointStackFrame,
     // choice_point for backtracking later.
 
 };
@@ -68,18 +78,51 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
     try group_index_stack.push(allocator, 0); // Push group index 0 as main match in stack.
     defer group_index_stack.deinit(allocator);
     var ip: usize = 0;
+    var groups: ?[]MatchGroup = null;
+    errdefer {
+        if (groups) |grps| {
+            allocator.free(grps);
+        }
+    }
 
     while (ip < bytecode.len) : (ip += 1) {
         switch (bytecode[ip]) {
-            .allocate_groups => {},
-            .split => {},
+            .allocate_groups => |alloc_instr| {
+                if (groups) |_| {
+                    return core_types.VMError.InvalidGroupAllocation;
+                } else {
+                    groups = try allocator.alloc(MatchGroup, alloc_instr.size);
+                }
+            },
+            .split => |split_instr| {
+                try main_stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .stack_depth = main_stack.data.len } });
+                ip = split_instr.left;
+            },
             .repeat_start => {},
             .repeat_end => {},
-            .jmp => {},
-            .literal => {},
-            .end_match => {},
-            .capture_start => {},
-            .capture_end => {},
+            .jmp => |jmp_instr| {
+                ip = jmp_instr;
+            },
+            .literal => {
+                // try to match
+                // or else backtrack
+            },
+            .end_match => {
+                if (groups) |grps| {
+                    return Match{ .groups = grps };
+                } else {
+                    return core_types.StackError.StackEmptyError;
+                }
+            },
+            .capture_start => {
+                // push capture id
+                // make current slice point to pushed group id
+                // current slice should be adjusted until added to capture_end
+            },
+            .capture_end => {
+                // pop capture id
+                // save current slice to popped id in array
+            },
             .atomic_start => {},
             .atomic_end => {},
             .lookahead_start => {},
@@ -93,8 +136,7 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
             .class => {},
         }
     }
-    // Matching contents.
+    // Failed matching contents.
     _ = string;
-    return Match{};
+    return Match{ .groups = undefined };
 }
-
