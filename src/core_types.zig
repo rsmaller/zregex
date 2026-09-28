@@ -275,4 +275,6 @@ pub const StackError = error{
 
 pub const VMError = error{
     InvalidGroupAllocation,
+    InvalidStackArrangement,
+    FailedMatch,
 };

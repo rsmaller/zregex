@@ -9,12 +9,12 @@ pub const vm = @import("vm.zig");
 pub const Pattern = struct {
     ast: ?core_types.AST,
     bytecode: []codegen.Instruction,
-    pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !Match {
+    pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !?Match {
         return try vm.match(allocator, self.bytecode, string);
     }
 };
 
-pub const Match = vm.Match;
+pub const Match = vm.SlicedMatch;
 
 pub const ASTPrintOptions = core_types.ASTPrintOptions; // re-namespacing print options type for easier interfacing.
 

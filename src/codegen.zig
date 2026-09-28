@@ -149,7 +149,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
         .repetition => |rep| {
             const rep_start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_start = .{ .min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type } }, instruction_ptr);
             try emitRecursive(allocator, labels, instructions, fixups, rep.child, instruction_ptr, recursion_level + 1);
-            _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index }, instruction_ptr);
+            _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index + 1 }, instruction_ptr); // Repeat_end must just jump past the repeat_start instruction, to the next one, which may or may not be the repeat_end instruction itself.
             try emitLabel(allocator, labels, instruction_ptr);
         },
         .alternation => |alt| {
