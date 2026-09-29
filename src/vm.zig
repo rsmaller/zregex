@@ -27,6 +27,7 @@ const ChoicePointStackFrame = struct {
     backtrack_ip: usize,
     stack_depth: usize,
     backtrack_str_ptr: usize,
+    previous_count: usize,
 };
 
 const GroupStackFrame = struct {
@@ -87,21 +88,28 @@ fn Stack(T: type) type {
 
 const VMMainStack = Stack(StackFrame);
 
-pub fn isDigit(char: u8) bool {
+pub fn isDigit(string: []const u8, index: usize) bool {
+    if (index >= string.len) return false;
+    const char: u8 = string[index];
     return char >= '0' and char <= '9';
 }
 
-pub fn isWord(char: u8) bool {
-    return isDigit(char) or (char >= 'a' and char <= 'z') or (char >= 'A' and char <= 'Z');
+pub fn isWord(string: []const u8, index: usize) bool {
+    if (index >= string.len) return false;
+    const char: u8 = string[index];
+    return isDigit(string, index) or (char >= 'a' and char <= 'z') or (char >= 'A' and char <= 'Z');
 }
 
-pub fn isWhitespace(char: u8) bool {
+pub fn isWhitespace(string: []const u8, index: usize) bool {
+    if (index >= string.len) return false;
+    const char: u8 = string[index];
     return char == ' ' or char == '\n' or char == '\t' or char == '\r'; 
 }
 
 const VMExecutionContext = struct {
     stack: VMMainStack,
     ip: usize,
+    jmp_queued: bool,
     str_ptr: usize,
     current_group: usize,
     current_count: usize,
@@ -110,6 +118,7 @@ const VMExecutionContext = struct {
         return .{
             .stack = try VMMainStack.init(allocator),
             .ip = 0,
+            .jmp_queued = false,
             .current_count = 0,
             .str_ptr = start_ptr,
             .current_group = 0,
@@ -119,7 +128,11 @@ const VMExecutionContext = struct {
     pub fn deinit(self: *@This(), allocator: anytype) void {
         self.stack.deinit(allocator);
     }
-    pub fn backtrack(self: *@This(), allocator: anytype) !bool { // Returns true when resulting in a failing state.
+    pub fn jmp(self: *@This(), jmp_point: usize) void {
+        self.ip = jmp_point;
+        self.jmp_queued = true;
+    }
+    pub fn backtrack(self: *@This(), allocator: anytype) !bool { // Returns false when there is no fallback.
         while (self.stack.hasItem()) {
             const current_item = try self.stack.pop(allocator);
             switch(current_item) {
@@ -132,13 +145,17 @@ const VMExecutionContext = struct {
                     self.current_count = rep.previous_count;
                 },
                 .choice_point => |choice| {
-                    self.ip = choice.backtrack_ip;
                     self.str_ptr = choice.backtrack_str_ptr;
-                    return false; // no failure incurred when backtracking has a fallback.
+                    self.current_count = choice.previous_count;
+                    self.jmp(choice.backtrack_ip);
+                    return true; // no failure incurred when backtracking has a fallback.
                 },
             }
         }
-        return true;
+        if (self.groups) |grps| {
+            allocator.free(grps); // free the groups if there is no error but match fails.
+        }
+        return false;
     }
 };
 
@@ -158,7 +175,7 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
         main_context.ip = 0; // ensure to reset ip every time.
         main_context.str_ptr = test_start_ptr;
         main_context.current_group = 0;
-        const current_match = try vm_internal_match(allocator, &main_context, bytecode, string);
+        const current_match = try internal_match(allocator, &main_context, bytecode, string);
         if (current_match) |success| { // check the match value for null
             const result = try match_index_correlate(allocator, string, success);
             allocator.free(success.groups);
@@ -168,7 +185,18 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
     return null;
 }
 
-pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, string: []const u8) !?Match {
+fn repetition_count_lt(count: usize, max: core_types.RepetitionBoundType) bool {
+    switch(max) {
+        .bounded => |bounded_max| {
+            return count < bounded_max;
+        },
+        .unbounded => {
+            return true;
+        }
+    }
+}
+
+pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, string: []const u8) !?Match {
     // VM contents.
     errdefer {
         if (main_context.groups) |grps| {
@@ -177,7 +205,7 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
     }
     while (main_context.ip < bytecode.len) {
         // std.debug.print("Current ip is {d}\n", .{main_context.ip});
-        var ip_set: bool = false;
+        main_context.jmp_queued = false;
         switch (bytecode[main_context.ip]) {
             .allocate_groups => |alloc_instr| {
                 std.debug.print("allocating groups\n", .{});
@@ -189,7 +217,7 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
             },
             .split => |split_instr| {
                 std.debug.print("doing split\n", .{});
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
                 main_context.ip = split_instr.left;
             },
             .repeat_start => |rep| {
@@ -197,17 +225,49 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
                 try main_context.stack.push(allocator, .{.repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_count = main_context.current_count } });
                 main_context.current_count = 0; // start new counting.
             },
-            .repeat_end => {
+            .repeat_end => |end| {
                 std.debug.print("ending repetition\n", .{});
-                // increment counter.
                 // do conditional backtracking based on greedy, lazy, or possessive.
                 // jump back to start of repetition, right after repeat start.
+                var min: usize = undefined;
+                var max: core_types.RepetitionBoundType = undefined;
+                var mode: core_types.RepeaterType = undefined;
+                main_context.current_count += 1;
+                switch (bytecode[end-1]) {
+                    .repeat_start => |rep_instr| {
+                        min = rep_instr.min;
+                        max = rep_instr.max;
+                        mode = rep_instr.mode;
+                    },
+                    else => {
+                        return core_types.BytecodeGenError.UnexpectedBytecodeType;
+                    }
+                }
+                if (main_context.current_count < min) {
+                    // do another repetition.
+                    // increment counter.
+                    // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
+                    main_context.jmp(end);
+                } else {
+                    switch(mode) {
+                        .greedy => {
+                            if (repetition_count_lt(main_context.current_count, max)) {
+                                // backtracking will kick out of the current_count area.
+                                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
+                                main_context.jmp(end);
+                            } else {
+                                main_context.jmp(main_context.ip + 1);
+                            }
+                        },
+                        .lazy => {},
+                        .possessive => {}
+                    }
+                }
                 // when popping repeat frame, ensure to set counter back to what it was. previously, stored in repeat_start node.
             },
             .jmp => |jmp_instr| {
                 std.debug.print("jumping\n", .{});
-                main_context.ip = jmp_instr;
-                ip_set = true;
+                main_context.jmp(jmp_instr);
             },
             .literal => |lit| {
                 std.debug.print("matching a literal\n", .{});
@@ -215,30 +275,34 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
                 var consuming = true;
                 switch(lit.data) {
                     .generic => |gen| {
-                        matched = string[main_context.str_ptr] == gen;
+                        if (main_context.str_ptr >= string.len) {
+                            matched = false;
+                        } else {
+                            matched = string[main_context.str_ptr] == gen;
+                        }
                     },
                     .digit => {
-                        matched = isDigit(string[main_context.str_ptr]);
+                        matched = isDigit(string, main_context.str_ptr);
                     },
                     .word => {
-                        matched = isWord(string[main_context.str_ptr]);
+                        matched = isWord(string, main_context.str_ptr);
                     },
                     .word_boundary => {
                         if (main_context.str_ptr == 0 and main_context.str_ptr >= string.len) {
                             matched = false;
                         } else if (main_context.str_ptr == 0) {
-                            matched = isWord(string[main_context.str_ptr]);
+                            matched = isWord(string, main_context.str_ptr);
                         } else if (main_context.str_ptr == string.len) {
-                            matched = isWord(string[main_context.str_ptr - 1]);
+                            matched = isWord(string, main_context.str_ptr - 1);
                         } else if (main_context.str_ptr != 0 and main_context.str_ptr <= string.len) {
-                            matched = isWord(string[main_context.str_ptr - 1]) != isWord(string[main_context.str_ptr]); 
+                            matched = isWord(string, main_context.str_ptr - 1) != isWord(string, main_context.str_ptr);
                         } else {
                             matched = false; // failsafe.
                         }
                         consuming = false;
                     },
                     .whitespace => {
-                        matched = isWhitespace(string[main_context.str_ptr]);
+                        matched = isWhitespace(string, main_context.str_ptr);
                     },
                     .start_anchor => {
                         consuming = false;
@@ -251,22 +315,17 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
                         if (main_context.str_ptr >= string.len or string[main_context.str_ptr] == '\n') matched = false;
                     },
                 }
-                matched = matched and !lit.inverted;
+                if (lit.inverted) {
+                    matched = !matched;
+                }
                 if (matched) {
                     if (consuming) {
                         main_context.str_ptr += 1;
                     }
                 } else {
-                    // backtrack
-                    const failure = try main_context.backtrack(allocator);
-                    if (failure) {
-                        // Failed matching contents.
-                        if (main_context.groups) |grps| {
-                            allocator.free(grps); // free the groups if there is no error but match fails.
-                        }
+                    if (!try main_context.backtrack(allocator)) {
                         return null;
                     }
-                    ip_set = true;
                 }
             },
             .end_match => {
@@ -289,19 +348,10 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
             },
             .capture_end => |cap| {
                 std.debug.print("ending capture {d}\n", .{cap});
-                const popped_group = try main_context.stack.pop(allocator);
-                switch(popped_group) {
-                    .group => |tested_group| {
-                        if (main_context.groups) |grps| {
-                            grps[tested_group.current_group].end = main_context.str_ptr;
-                        } else {
-                            return core_types.VMError.InvalidGroupAllocation;
-                        }
-                    },
-                    else => {
-                        std.debug.print("Found {s} instead of Group frame!\n", .{@typeName(@TypeOf(popped_group))});
-                        return core_types.VMError.InvalidStackArrangement;
-                    },
+                if (main_context.groups) |grps| {
+                    grps[cap].end = main_context.str_ptr;
+                } else {
+                    return core_types.VMError.InvalidGroupAllocation;
                 }
             },
             .atomic_start => {},
@@ -316,7 +366,7 @@ pub fn vm_internal_match(allocator: anytype, main_context: *VMExecutionContext, 
             .neg_lookbehind_end => {},
             .class => {},
         }
-        if (!ip_set) {
+        if (!main_context.jmp_queued) {
             main_context.ip += 1; // don't skip past the instruction that was just set.
         }
     }

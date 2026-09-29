@@ -267,6 +267,7 @@ pub const BytecodeGenError = error{
     InvalidGroupID,
     InvalidClassMember,
     InvalidTypeConversion,
+    UnexpectedBytecodeType,
 };
 
 pub const StackError = error{

@@ -23,7 +23,7 @@ pub fn main(init: std.process.Init) !void {
     // const pattern: []const u8 = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$";
     // const pattern = "[abc]";
     // const pattern = "(?<=abc|xyz)";
-    const pattern = "\\w\\w(\\w\\w\\w)";
+    const pattern = "\\w{2,4}(\\w{3,6})";
     const compiledPattern = try zregex.compile(allocator, pattern);
     defer zregex.destroyPattern(allocator, compiledPattern) catch @panic("Could not free compiled pattern!");
     try stdout.print("Pattern: {s}\n", .{pattern});
