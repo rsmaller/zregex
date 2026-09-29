@@ -272,10 +272,12 @@ pub const BytecodeGenError = error{
 
 pub const StackError = error{
     StackEmptyError,
+    InvalidStackAccess,
 };
 
 pub const VMError = error{
     InvalidGroupAllocation,
     InvalidStackArrangement,
     FailedMatch,
+    NullIndexAccess,
 };

@@ -32,7 +32,7 @@ const ChoicePointStackFrame = struct {
 
 const GroupStackFrame = struct {
     current_group: usize,
-    previous_group: ?usize,
+    previous_group_ptr: ?usize, // the index that points to the previous group frame.
 };
 
 const StackFrame = union(enum) {
@@ -80,6 +80,12 @@ fn Stack(T: type) type {
             }
             return self.data[self.size - 1];
         }
+        fn fetchAtIndex(self: *@This(), index: usize) !T {
+            if (index >= self.size) {
+                return core_types.StackError.InvalidStackAccess;
+            }
+            return self.data[index];
+        }
         fn hasItem(self: *@This()) bool {
             return self.size > 0;
         }
@@ -88,30 +94,12 @@ fn Stack(T: type) type {
 
 const VMMainStack = Stack(StackFrame);
 
-pub fn isDigit(string: []const u8, index: usize) bool {
-    if (index >= string.len) return false;
-    const char: u8 = string[index];
-    return char >= '0' and char <= '9';
-}
-
-pub fn isWord(string: []const u8, index: usize) bool {
-    if (index >= string.len) return false;
-    const char: u8 = string[index];
-    return isDigit(string, index) or (char >= 'a' and char <= 'z') or (char >= 'A' and char <= 'Z');
-}
-
-pub fn isWhitespace(string: []const u8, index: usize) bool {
-    if (index >= string.len) return false;
-    const char: u8 = string[index];
-    return char == ' ' or char == '\n' or char == '\t' or char == '\r'; 
-}
-
 const VMExecutionContext = struct {
     stack: VMMainStack,
     ip: usize,
     jmp_queued: bool,
     str_ptr: usize,
-    current_group: usize,
+    current_group_ptr: ?usize, // the index that points to the current group frame.
     current_count: usize,
     groups: ?[]MatchGroup,
     pub fn init(allocator: anytype, start_ptr: usize) !VMExecutionContext {
@@ -121,7 +109,7 @@ const VMExecutionContext = struct {
             .jmp_queued = false,
             .current_count = 0,
             .str_ptr = start_ptr,
-            .current_group = 0,
+            .current_group_ptr = null,
             .groups = null,
         };
     }
@@ -133,13 +121,12 @@ const VMExecutionContext = struct {
         self.jmp_queued = true;
     }
     pub fn backtrack(self: *@This(), allocator: anytype) !bool { // Returns false when there is no fallback.
+        std.debug.print("BACKTRACKING!!!\n", .{});
         while (self.stack.hasItem()) {
             const current_item = try self.stack.pop(allocator);
-            switch(current_item) {
+            switch (current_item) {
                 .group => |grp| {
-                    if (grp.previous_group) |prev_grp| {
-                        self.current_group = prev_grp;
-                    }
+                    self.current_group_ptr = grp.previous_group_ptr; // null check here; may not be necessary?
                 },
                 .repeat => |rep| {
                     self.current_count = rep.previous_count;
@@ -159,12 +146,48 @@ const VMExecutionContext = struct {
     }
 };
 
+fn unpack_index_panic(index: ?usize) !usize {
+    if (index) |ret| {
+        return ret;
+    }
+    return core_types.VMError.NullIndexAccess;
+}
+
+fn unpack_item_tag_panic(item: anytype, comptime tag: @typeInfo(@TypeOf(item)).@"union".tag_type.?) !@FieldType(@TypeOf(item), @tagName(tag)) {
+    switch (item) {
+        tag => |ret| {
+            return ret;
+        },
+        else => {
+            return core_types.VMError.InvalidStackArrangement;
+        },
+    }
+}
+
+pub fn isDigit(string: []const u8, index: usize) bool {
+    if (index >= string.len) return false;
+    const char: u8 = string[index];
+    return char >= '0' and char <= '9';
+}
+
+pub fn isWord(string: []const u8, index: usize) bool {
+    if (index >= string.len) return false;
+    const char: u8 = string[index];
+    return isDigit(string, index) or (char >= 'a' and char <= 'z') or (char >= 'A' and char <= 'Z');
+}
+
+pub fn isWhitespace(string: []const u8, index: usize) bool {
+    if (index >= string.len) return false;
+    const char: u8 = string[index];
+    return char == ' ' or char == '\n' or char == '\t' or char == '\r';
+}
+
 pub fn match_index_correlate(allocator: anytype, string: []const u8, match_item: Match) !SlicedMatch {
     var group_arr = try allocator.alloc([]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
         group_arr[i] = string[group.start..group.end];
     }
-    return SlicedMatch{.groups = group_arr};
+    return SlicedMatch{ .groups = group_arr };
 }
 
 pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []const u8) !?SlicedMatch {
@@ -174,7 +197,7 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
     while (test_start_ptr < string.len) : (test_start_ptr += 1) {
         main_context.ip = 0; // ensure to reset ip every time.
         main_context.str_ptr = test_start_ptr;
-        main_context.current_group = 0;
+        main_context.current_group_ptr = null;
         const current_match = try internal_match(allocator, &main_context, bytecode, string);
         if (current_match) |success| { // check the match value for null
             const result = try match_index_correlate(allocator, string, success);
@@ -186,13 +209,13 @@ pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []cons
 }
 
 fn repetition_count_lt(count: usize, max: core_types.RepetitionBoundType) bool {
-    switch(max) {
+    switch (max) {
         .bounded => |bounded_max| {
             return count < bounded_max;
         },
         .unbounded => {
             return true;
-        }
+        },
     }
 }
 
@@ -210,11 +233,11 @@ const ConditionalConsumingMatch = struct {
 
 fn literal_match(literal: anytype, string: []const u8, index: usize) ConditionalConsumingMatch {
     if (index > string.len) {
-        return .{.matching = false, .consuming = false};
+        return .{ .matching = false, .consuming = false };
     }
     var matching = false;
     var consuming = true;
-    switch(literal.data) {
+    switch (literal.data) {
         .generic => |gen| {
             if (index >= string.len) {
                 matching = false;
@@ -268,7 +291,7 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
     var max: core_types.RepetitionBoundType = undefined;
     var mode: core_types.RepeaterType = undefined;
     main_context.current_count += 1;
-    switch (bytecode[jump_index-1]) { // switch on the data the repetition_end refers to.
+    switch (bytecode[jump_index - 1]) { // switch on the data the repetition_end refers to.
         .repeat_start => |rep_instr| {
             min = rep_instr.min;
             max = rep_instr.max;
@@ -276,12 +299,12 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
         },
         else => {
             return core_types.BytecodeGenError.UnexpectedBytecodeType;
-        }
+        },
     }
     if (main_context.current_count < min) {
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
     } else {
-        switch(mode) {
+        switch (mode) {
             .greedy => {
                 if (repetition_count_lt(main_context.current_count, max)) {
                     try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
@@ -291,7 +314,7 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
                 }
             },
             .lazy => {},
-            .possessive => {}
+            .possessive => {},
         }
     }
 }
@@ -322,7 +345,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .repeat_start => |rep| {
                 std.debug.print("starting repetition\n", .{});
-                try main_context.stack.push(allocator, .{.repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_count = main_context.current_count } });
+                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_count = main_context.current_count } });
                 main_context.current_count = 0; // start new counting.
             },
             .repeat_end => |end| {
@@ -355,19 +378,48 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 }
             },
             .capture_start => |cap| {
-                std.debug.print("starting capture {d}\n", .{cap});
-                try main_context.stack.push(allocator, .{ .group = .{.current_group = cap, .previous_group = main_context.current_group} });
-                main_context.current_group = cap; // make current slice point to pushed group id
+                std.debug.print("starting capture {d}", .{cap});
+                try main_context.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = main_context.current_group_ptr } });
+                if (main_context.current_group_ptr) |arg2| {
+                    std.debug.print(", pushed group frame index {d} onto stack pointing to prev index {d}\n", .{ main_context.stack.size - 1, arg2 });
+                } else {
+                    std.debug.print(", pushed group frame index {d} onto stack pointing to prev index NULL\n", .{main_context.stack.size - 1});
+                }
+                switch (main_context.stack.data[main_context.stack.size - 1]) {
+                    .group => {
+                        main_context.current_group_ptr = main_context.stack.size - 1; // make current slice point to pushed group id
+                    },
+                    else => {
+                        return core_types.VMError.InvalidStackArrangement;
+                    },
+                }
                 if (main_context.groups) |grps| {
-                    grps[main_context.current_group].start = main_context.str_ptr; // current match group slice starts here; should be adjusted until added to capture_end.
+                    if (main_context.current_group_ptr) |grp_ptr| {
+                        switch ((try main_context.stack.fetchAtIndex(grp_ptr))) {
+                            .group => |grp| {
+                                const index = try unpack_index_panic(grp.current_group);
+                                grps[index].start = main_context.str_ptr;
+                            },
+                            else => {
+                                return core_types.VMError.InvalidStackArrangement;
+                            },
+                        }
+                    }
                 }
             },
             .capture_end => |cap| {
-                std.debug.print("ending capture {d}\n", .{cap});
+                std.debug.print("ending capture {d}", .{cap});
                 if (main_context.groups) |grps| {
                     grps[cap].end = main_context.str_ptr;
                 } else {
                     return core_types.VMError.InvalidGroupAllocation;
+                }
+                if (main_context.current_group_ptr) |grp_ptr| {
+                    std.debug.print(", going back from ptr {d}\n", .{grp_ptr});
+                    const group_frame = try unpack_item_tag_panic(try main_context.stack.fetchAtIndex(grp_ptr), .group);
+                    main_context.current_group_ptr = group_frame.previous_group_ptr;
+                } else {
+                    return core_types.VMError.InvalidStackArrangement;
                 }
             },
             .atomic_start => {},
