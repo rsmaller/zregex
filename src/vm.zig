@@ -196,6 +196,106 @@ fn repetition_count_lt(count: usize, max: core_types.RepetitionBoundType) bool {
     }
 }
 
+fn class_match(class: u256, string: []const u8, index: usize) bool {
+    if (index >= string.len) {
+        return false;
+    }
+    return ((@as(u256, 1) << string[index]) & class) != 0;
+}
+
+const ConditionalConsumingMatch = struct {
+    matching: bool,
+    consuming: bool,
+};
+
+fn literal_match(literal: anytype, string: []const u8, index: usize) ConditionalConsumingMatch {
+    if (index > string.len) {
+        return .{.matching = false, .consuming = false};
+    }
+    var matching = false;
+    var consuming = true;
+    switch(literal.data) {
+        .generic => |gen| {
+            if (index >= string.len) {
+                matching = false;
+            } else {
+                matching = string[index] == gen;
+            }
+        },
+        .digit => {
+            matching = isDigit(string, index);
+        },
+        .word => {
+            matching = isWord(string, index);
+        },
+        .word_boundary => {
+            if (index == 0 and index >= string.len) {
+                matching = false;
+            } else if (index == 0) {
+                matching = isWord(string, index);
+            } else if (index == string.len) {
+                matching = isWord(string, index - 1);
+            } else if (index != 0 and index <= string.len) {
+                matching = isWord(string, index - 1) != isWord(string, index);
+            } else {
+                matching = false; // failsafe.
+            }
+            consuming = false;
+        },
+        .whitespace => {
+            matching = isWhitespace(string, index);
+        },
+        .start_anchor => {
+            consuming = false;
+        },
+        .end_anchor => {
+            consuming = false;
+        },
+        .any => {
+            matching = true;
+            if (index >= string.len or string[index] == '\n') matching = false;
+        },
+    }
+    if (literal.inverted) {
+        matching = !matching;
+    }
+    return .{ .matching = matching, .consuming = consuming };
+}
+
+fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, jump_index: usize) !void {
+    std.debug.print("ending repetition\n", .{});
+    var min: usize = undefined;
+    var max: core_types.RepetitionBoundType = undefined;
+    var mode: core_types.RepeaterType = undefined;
+    main_context.current_count += 1;
+    switch (bytecode[jump_index-1]) { // switch on the data the repetition_end refers to.
+        .repeat_start => |rep_instr| {
+            min = rep_instr.min;
+            max = rep_instr.max;
+            mode = rep_instr.mode;
+        },
+        else => {
+            return core_types.BytecodeGenError.UnexpectedBytecodeType;
+        }
+    }
+    if (main_context.current_count < min) {
+        main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
+    } else {
+        switch(mode) {
+            .greedy => {
+                if (repetition_count_lt(main_context.current_count, max)) {
+                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
+                    main_context.jmp(jump_index);
+                } else {
+                    main_context.jmp(main_context.ip + 1);
+                }
+            },
+            .lazy => {},
+            .possessive => {}
+        }
+    }
+}
+
 pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, string: []const u8) !?Match {
     // VM contents.
     errdefer {
@@ -227,43 +327,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .repeat_end => |end| {
                 std.debug.print("ending repetition\n", .{});
-                // do conditional backtracking based on greedy, lazy, or possessive.
-                // jump back to start of repetition, right after repeat start.
-                var min: usize = undefined;
-                var max: core_types.RepetitionBoundType = undefined;
-                var mode: core_types.RepeaterType = undefined;
-                main_context.current_count += 1;
-                switch (bytecode[end-1]) {
-                    .repeat_start => |rep_instr| {
-                        min = rep_instr.min;
-                        max = rep_instr.max;
-                        mode = rep_instr.mode;
-                    },
-                    else => {
-                        return core_types.BytecodeGenError.UnexpectedBytecodeType;
-                    }
-                }
-                if (main_context.current_count < min) {
-                    // do another repetition.
-                    // increment counter.
-                    // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
-                    main_context.jmp(end);
-                } else {
-                    switch(mode) {
-                        .greedy => {
-                            if (repetition_count_lt(main_context.current_count, max)) {
-                                // backtracking will kick out of the current_count area.
-                                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
-                                main_context.jmp(end);
-                            } else {
-                                main_context.jmp(main_context.ip + 1);
-                            }
-                        },
-                        .lazy => {},
-                        .possessive => {}
-                    }
-                }
-                // when popping repeat frame, ensure to set counter back to what it was. previously, stored in repeat_start node.
+                try repeat_next_iteration(allocator, main_context, bytecode, end);
             },
             .jmp => |jmp_instr| {
                 std.debug.print("jumping\n", .{});
@@ -271,55 +335,9 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .literal => |lit| {
                 std.debug.print("matching a literal\n", .{});
-                var matched = false;
-                var consuming = true;
-                switch(lit.data) {
-                    .generic => |gen| {
-                        if (main_context.str_ptr >= string.len) {
-                            matched = false;
-                        } else {
-                            matched = string[main_context.str_ptr] == gen;
-                        }
-                    },
-                    .digit => {
-                        matched = isDigit(string, main_context.str_ptr);
-                    },
-                    .word => {
-                        matched = isWord(string, main_context.str_ptr);
-                    },
-                    .word_boundary => {
-                        if (main_context.str_ptr == 0 and main_context.str_ptr >= string.len) {
-                            matched = false;
-                        } else if (main_context.str_ptr == 0) {
-                            matched = isWord(string, main_context.str_ptr);
-                        } else if (main_context.str_ptr == string.len) {
-                            matched = isWord(string, main_context.str_ptr - 1);
-                        } else if (main_context.str_ptr != 0 and main_context.str_ptr <= string.len) {
-                            matched = isWord(string, main_context.str_ptr - 1) != isWord(string, main_context.str_ptr);
-                        } else {
-                            matched = false; // failsafe.
-                        }
-                        consuming = false;
-                    },
-                    .whitespace => {
-                        matched = isWhitespace(string, main_context.str_ptr);
-                    },
-                    .start_anchor => {
-                        consuming = false;
-                    },
-                    .end_anchor => {
-                        consuming = false;
-                    },
-                    .any => {
-                        matched = true;
-                        if (main_context.str_ptr >= string.len or string[main_context.str_ptr] == '\n') matched = false;
-                    },
-                }
-                if (lit.inverted) {
-                    matched = !matched;
-                }
-                if (matched) {
-                    if (consuming) {
+                const literal_match_container = literal_match(lit, string, main_context.str_ptr);
+                if (literal_match_container.matching) {
+                    if (literal_match_container.consuming) {
                         main_context.str_ptr += 1;
                     }
                 } else {
@@ -339,12 +357,10 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             .capture_start => |cap| {
                 std.debug.print("starting capture {d}\n", .{cap});
                 try main_context.stack.push(allocator, .{ .group = .{.current_group = cap, .previous_group = main_context.current_group} });
-                main_context.current_group = cap;
+                main_context.current_group = cap; // make current slice point to pushed group id
                 if (main_context.groups) |grps| {
-                    grps[main_context.current_group].start = main_context.str_ptr; // current match group slice starts here.
+                    grps[main_context.current_group].start = main_context.str_ptr; // current match group slice starts here; should be adjusted until added to capture_end.
                 }
-                // make current slice point to pushed group id
-                // current slice should be adjusted until added to capture_end
             },
             .capture_end => |cap| {
                 std.debug.print("ending capture {d}\n", .{cap});
@@ -364,7 +380,15 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             .neg_lookahead_end => {},
             .neg_lookbehind_start => {},
             .neg_lookbehind_end => {},
-            .class => {},
+            .class => |class| {
+                if (class_match(class, string, main_context.str_ptr)) {
+                    main_context.str_ptr += 1;
+                } else {
+                    if (!try main_context.backtrack(allocator)) {
+                        return null;
+                    }
+                }
+            },
         }
         if (!main_context.jmp_queued) {
             main_context.ip += 1; // don't skip past the instruction that was just set.
