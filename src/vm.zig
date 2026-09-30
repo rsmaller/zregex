@@ -20,16 +20,15 @@ const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecod
     min: usize,
     max: core_types.RepetitionBoundType,
     mode: core_types.RepeaterType,
-    previous_rep_ptr: ?usize, // TODO: rename this to previous_rep_ptr.
+    previous_rep_ptr: ?usize,
     current_count: usize,
-    // TODO: add an actual counter here that repetitions will increment while this is the current frame.
 };
 
 const ChoicePointStackFrame = struct {
     backtrack_ip: usize,
     stack_depth: usize,
     backtrack_str_ptr: usize,
-    previous_count: usize, // TODO: make sure backtracking sets the current stack frame's count to this count.
+    previous_count: usize,
 };
 
 const GroupStackFrame = struct {
@@ -103,14 +102,14 @@ const VMExecutionContext = struct {
     jmp_queued: bool,
     str_ptr: usize,
     current_group_ptr: ?usize, // the index that points to the current group frame.
-    current_rep_ptr: ?usize, // TODO: change this to a ?usize and have it be current_rep_ptr
+    current_rep_ptr: ?usize,
     groups: ?[]MatchGroup,
     pub fn init(allocator: anytype, start_ptr: usize) !VMExecutionContext {
         return .{
             .stack = try VMMainStack.init(allocator),
             .ip = 0,
             .jmp_queued = false,
-            .current_rep_ptr = null, // TODO: change this to current_rep_ptr = null,
+            .current_rep_ptr = null,
             .str_ptr = start_ptr,
             .current_group_ptr = null,
             .groups = null,
@@ -176,7 +175,7 @@ const VMExecutionContext = struct {
                 },
                 .choice_point => |choice| {
                     self.str_ptr = choice.backtrack_str_ptr;
-                    (try self.currentRepFrameReference()).current_count = choice.previous_count; // TODO: change this to match pointer changes.
+                    (try self.currentRepFrameReference()).current_count = choice.previous_count;
                     self.jmp(choice.backtrack_ip);
                     return true; // no failure incurred when backtracking has a fallback.
                 },
@@ -312,7 +311,7 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
     var min: usize = undefined;
     var max: core_types.RepetitionBoundType = undefined;
     var mode: core_types.RepeaterType = undefined;
-    (try main_context.currentRepFrameReference()).current_count += 1; // TODO: change this to increment on the current repetition frame.
+    (try main_context.currentRepFrameReference()).current_count += 1;
     switch (bytecode[jump_index - 1]) { // switch on the data the repetition_end refers to.
         .repeat_start => |rep_instr| {
             min = rep_instr.min;
@@ -323,13 +322,13 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
             return core_types.BytecodeGenError.UnexpectedBytecodeType;
         },
     }
-    if (try main_context.currentCount() < min) { // TODO: use fetchAtIndex() method to grab the current counter.
+    if (try main_context.currentCount() < min) {
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
     } else {
         switch (mode) {
             .greedy => {
-                if (repetition_count_lt(try main_context.currentCount(), max)) { // TODO: use fetchAtIndex() method to grab the current counter.
-                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } }); // TODO: change to pointers.
+                if (repetition_count_lt(try main_context.currentCount(), max)) {
+                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
                     main_context.jmp(jump_index);
                 } else {
                     main_context.current_rep_ptr = (try main_context.currentRepFrameReference()).previous_rep_ptr; // set to previous rep frame when exiting.
@@ -352,18 +351,17 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .split => |split_instr| {
                 // std.debug.print("doing split\n", .{});
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } }); // TODO: change to pointers.
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
                 main_context.ip = split_instr.left;
             },
             .repeat_start => |rep| {
                 // std.debug.print("starting repetition\n", .{});
-                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0 } }); // TODO: change to pointers.
-                main_context.current_rep_ptr = main_context.stack.size - 1; // TODO: init counter in stack push and change this to current repeat pointer.
+                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0 } });
+                main_context.current_rep_ptr = main_context.stack.size - 1;
             },
             .repeat_end => |end| {
                 // std.debug.print("ending repetition\n", .{});
                 try repeat_next_iteration(allocator, main_context, bytecode, end);
-                // TODO: unroll pointer to previous repetition.
             },
             .jmp => |jmp_instr| {
                 // std.debug.print("jumping\n", .{});
