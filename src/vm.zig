@@ -20,14 +20,16 @@ const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecod
     min: usize,
     max: core_types.RepetitionBoundType,
     mode: core_types.RepeaterType,
-    previous_count: usize,
+    previous_rep_ptr: ?usize, // TODO: rename this to previous_rep_ptr.
+    current_count: usize,
+    // TODO: add an actual counter here that repetitions will increment while this is the current frame.
 };
 
 const ChoicePointStackFrame = struct {
     backtrack_ip: usize,
     stack_depth: usize,
     backtrack_str_ptr: usize,
-    previous_count: usize,
+    previous_count: usize, // TODO: make sure backtracking sets the current stack frame's count to this count.
 };
 
 const GroupStackFrame = struct {
@@ -39,8 +41,6 @@ const StackFrame = union(enum) {
     choice_point: ChoicePointStackFrame,
     repeat: RepeatStackFrame,
     group: GroupStackFrame,
-    // choice_point for backtracking later.
-
 };
 
 fn Stack(T: type) type {
@@ -80,11 +80,14 @@ fn Stack(T: type) type {
             }
             return self.data[self.size - 1];
         }
-        fn fetchAtIndex(self: *@This(), index: usize) !T {
+        fn fetchPtrAtIndex(self: *@This(), index: usize) !*T {
             if (index >= self.size) {
                 return core_types.StackError.InvalidStackAccess;
             }
-            return self.data[index];
+            return &self.data[index];
+        }
+        fn fetchAtIndex(self: *@This(), index: usize) !T {
+            return (try self.fetchPtrAtIndex(index)).*;
         }
         fn hasItem(self: *@This()) bool {
             return self.size > 0;
@@ -100,14 +103,14 @@ const VMExecutionContext = struct {
     jmp_queued: bool,
     str_ptr: usize,
     current_group_ptr: ?usize, // the index that points to the current group frame.
-    current_count: usize,
+    current_rep_ptr: ?usize, // TODO: change this to a ?usize and have it be current_rep_ptr
     groups: ?[]MatchGroup,
     pub fn init(allocator: anytype, start_ptr: usize) !VMExecutionContext {
         return .{
             .stack = try VMMainStack.init(allocator),
             .ip = 0,
             .jmp_queued = false,
-            .current_count = 0,
+            .current_rep_ptr = null, // TODO: change this to current_rep_ptr = null,
             .str_ptr = start_ptr,
             .current_group_ptr = null,
             .groups = null,
@@ -115,10 +118,50 @@ const VMExecutionContext = struct {
     }
     pub fn deinit(self: *@This(), allocator: anytype) void {
         self.stack.deinit(allocator);
+        if (self.groups) |grps| {
+            allocator.free(grps);
+        }
     }
     pub fn jmp(self: *@This(), jmp_point: usize) void {
         self.ip = jmp_point;
         self.jmp_queued = true;
+    }
+    pub fn currentRepFrameReference(self: *@This()) !*RepeatStackFrame {
+        if (self.current_rep_ptr) |rep_ptr| {
+            switch ((try self.stack.fetchPtrAtIndex(rep_ptr)).*) {
+                .repeat => |*rep| {
+                    return rep;
+                },
+                else => {
+                    return core_types.VMError.InvalidStackArrangement;
+                },
+            }
+        } else {
+            return core_types.VMError.NullIndexAccess;
+        }
+    }
+    pub fn currentCount(self: *@This()) !usize {
+        return (try self.currentRepFrameReference()).current_count;
+    }
+    pub fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of the frame representing the current group.
+        switch (try self.stack.fetchAtIndex(try unpack_index_panic(self.current_group_ptr))) {
+            .group => |grp| {
+                return grp;
+            },
+            else => {
+                return core_types.VMError.InvalidStackArrangement;
+            },
+        }
+    }
+    pub fn currentGroupId(self: *@This()) !?usize { // Uses the frame of the current group to grab the current group ID.
+        return (try self.currentGroupFrame()).current_group;
+    }
+    pub fn currentGroupReference(self: *@This()) !*MatchGroup {
+        if (self.groups) |grps| {
+            return &grps[try unpack_index_panic(try self.currentGroupId())];
+        } else {
+            return core_types.VMError.NullIndexAccess;
+        }
     }
     pub fn backtrack(self: *@This(), allocator: anytype) !bool { // Returns false when there is no fallback.
         std.debug.print("BACKTRACKING!!!\n", .{});
@@ -129,18 +172,15 @@ const VMExecutionContext = struct {
                     self.current_group_ptr = grp.previous_group_ptr; // null check here; may not be necessary?
                 },
                 .repeat => |rep| {
-                    self.current_count = rep.previous_count;
+                    self.current_rep_ptr = rep.previous_rep_ptr;
                 },
                 .choice_point => |choice| {
                     self.str_ptr = choice.backtrack_str_ptr;
-                    self.current_count = choice.previous_count;
+                    (try self.currentRepFrameReference()).current_count = choice.previous_count; // TODO: change this to match pointer changes.
                     self.jmp(choice.backtrack_ip);
                     return true; // no failure incurred when backtracking has a fallback.
                 },
             }
-        }
-        if (self.groups) |grps| {
-            allocator.free(grps); // free the groups if there is no error but match fails.
         }
         return false;
     }
@@ -188,24 +228,6 @@ pub fn match_index_correlate(allocator: anytype, string: []const u8, match_item:
         group_arr[i] = string[group.start..group.end];
     }
     return SlicedMatch{ .groups = group_arr };
-}
-
-pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []const u8) !?SlicedMatch {
-    var test_start_ptr: usize = 0;
-    var main_context = try VMExecutionContext.init(allocator, test_start_ptr);
-    defer main_context.deinit(allocator);
-    while (test_start_ptr < string.len) : (test_start_ptr += 1) {
-        main_context.ip = 0; // ensure to reset ip every time.
-        main_context.str_ptr = test_start_ptr;
-        main_context.current_group_ptr = null;
-        const current_match = try internal_match(allocator, &main_context, bytecode, string);
-        if (current_match) |success| { // check the match value for null
-            const result = try match_index_correlate(allocator, string, success);
-            allocator.free(success.groups);
-            return result;
-        }
-    }
-    return null;
 }
 
 fn repetition_count_lt(count: usize, max: core_types.RepetitionBoundType) bool {
@@ -286,11 +308,11 @@ fn literal_match(literal: anytype, string: []const u8, index: usize) Conditional
 }
 
 fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, jump_index: usize) !void {
-    std.debug.print("ending repetition\n", .{});
+    // std.debug.print("ending repetition\n", .{});
     var min: usize = undefined;
     var max: core_types.RepetitionBoundType = undefined;
     var mode: core_types.RepeaterType = undefined;
-    main_context.current_count += 1;
+    (try main_context.currentRepFrameReference()).current_count += 1; // TODO: change this to increment on the current repetition frame.
     switch (bytecode[jump_index - 1]) { // switch on the data the repetition_end refers to.
         .repeat_start => |rep_instr| {
             min = rep_instr.min;
@@ -301,15 +323,16 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
             return core_types.BytecodeGenError.UnexpectedBytecodeType;
         },
     }
-    if (main_context.current_count < min) {
+    if (try main_context.currentCount() < min) { // TODO: use fetchAtIndex() method to grab the current counter.
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
     } else {
         switch (mode) {
             .greedy => {
-                if (repetition_count_lt(main_context.current_count, max)) {
-                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
+                if (repetition_count_lt(try main_context.currentCount(), max)) { // TODO: use fetchAtIndex() method to grab the current counter.
+                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } }); // TODO: change to pointers.
                     main_context.jmp(jump_index);
                 } else {
+                    main_context.current_rep_ptr = (try main_context.currentRepFrameReference()).previous_rep_ptr; // set to previous rep frame when exiting.
                     main_context.jmp(main_context.ip + 1);
                 }
             },
@@ -321,43 +344,33 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
 
 pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, string: []const u8) !?Match {
     // VM contents.
-    errdefer {
-        if (main_context.groups) |grps| {
-            allocator.free(grps);
-        }
-    }
     while (main_context.ip < bytecode.len) {
-        // std.debug.print("Current ip is {d}\n", .{main_context.ip});
         main_context.jmp_queued = false;
         switch (bytecode[main_context.ip]) {
-            .allocate_groups => |alloc_instr| {
-                std.debug.print("allocating groups\n", .{});
-                if (main_context.groups) |_| {
-                    return core_types.VMError.InvalidGroupAllocation;
-                } else {
-                    main_context.groups = try allocator.alloc(MatchGroup, alloc_instr.size);
-                }
+            .allocate_groups => { // This should only be done once per higher-level call to the VM, at bytecode index 0.
+                return core_types.VMError.InvalidStackArrangement;
             },
             .split => |split_instr| {
-                std.debug.print("doing split\n", .{});
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = main_context.current_count } });
+                // std.debug.print("doing split\n", .{});
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } }); // TODO: change to pointers.
                 main_context.ip = split_instr.left;
             },
             .repeat_start => |rep| {
-                std.debug.print("starting repetition\n", .{});
-                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_count = main_context.current_count } });
-                main_context.current_count = 0; // start new counting.
+                // std.debug.print("starting repetition\n", .{});
+                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0 } }); // TODO: change to pointers.
+                main_context.current_rep_ptr = main_context.stack.size - 1; // TODO: init counter in stack push and change this to current repeat pointer.
             },
             .repeat_end => |end| {
-                std.debug.print("ending repetition\n", .{});
+                // std.debug.print("ending repetition\n", .{});
                 try repeat_next_iteration(allocator, main_context, bytecode, end);
+                // TODO: unroll pointer to previous repetition.
             },
             .jmp => |jmp_instr| {
-                std.debug.print("jumping\n", .{});
+                // std.debug.print("jumping\n", .{});
                 main_context.jmp(jmp_instr);
             },
             .literal => |lit| {
-                std.debug.print("matching a literal\n", .{});
+                // std.debug.print("matching a literal\n", .{});
                 const literal_match_container = literal_match(lit, string, main_context.str_ptr);
                 if (literal_match_container.matching) {
                     if (literal_match_container.consuming) {
@@ -370,7 +383,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 }
             },
             .end_match => {
-                std.debug.print("match over!\n", .{});
+                // std.debug.print("match over!\n", .{});
                 if (main_context.groups) |grps| {
                     return Match{ .groups = grps };
                 } else {
@@ -378,49 +391,20 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 }
             },
             .capture_start => |cap| {
-                std.debug.print("starting capture {d}", .{cap});
+                // std.debug.print("starting capture {d}", .{cap});
                 try main_context.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = main_context.current_group_ptr } });
-                if (main_context.current_group_ptr) |arg2| {
-                    std.debug.print(", pushed group frame index {d} onto stack pointing to prev index {d}\n", .{ main_context.stack.size - 1, arg2 });
-                } else {
-                    std.debug.print(", pushed group frame index {d} onto stack pointing to prev index NULL\n", .{main_context.stack.size - 1});
-                }
-                switch (main_context.stack.data[main_context.stack.size - 1]) {
-                    .group => {
-                        main_context.current_group_ptr = main_context.stack.size - 1; // make current slice point to pushed group id
-                    },
-                    else => {
-                        return core_types.VMError.InvalidStackArrangement;
-                    },
-                }
-                if (main_context.groups) |grps| {
-                    if (main_context.current_group_ptr) |grp_ptr| {
-                        switch ((try main_context.stack.fetchAtIndex(grp_ptr))) {
-                            .group => |grp| {
-                                const index = try unpack_index_panic(grp.current_group);
-                                grps[index].start = main_context.str_ptr;
-                            },
-                            else => {
-                                return core_types.VMError.InvalidStackArrangement;
-                            },
-                        }
-                    }
-                }
+                // if (main_context.current_group_ptr) |arg2| {
+                //     std.debug.print(", pushed group frame index {d} onto stack pointing to prev index {d}\n", .{ main_context.stack.size - 1, arg2 });
+                // } else {
+                //     std.debug.print(", pushed group frame index {d} onto stack pointing to prev index NULL\n", .{main_context.stack.size - 1});
+                // }
+                main_context.current_group_ptr = main_context.stack.size - 1; // Top of the stack just pushed to is the group_ptr.
+                (try main_context.currentGroupReference()).start = main_context.str_ptr;
             },
-            .capture_end => |cap| {
-                std.debug.print("ending capture {d}", .{cap});
-                if (main_context.groups) |grps| {
-                    grps[cap].end = main_context.str_ptr;
-                } else {
-                    return core_types.VMError.InvalidGroupAllocation;
-                }
-                if (main_context.current_group_ptr) |grp_ptr| {
-                    std.debug.print(", going back from ptr {d}\n", .{grp_ptr});
-                    const group_frame = try unpack_item_tag_panic(try main_context.stack.fetchAtIndex(grp_ptr), .group);
-                    main_context.current_group_ptr = group_frame.previous_group_ptr;
-                } else {
-                    return core_types.VMError.InvalidStackArrangement;
-                }
+            .capture_end => {
+                (try main_context.currentGroupReference()).end = main_context.str_ptr;
+                const group_frame = try main_context.currentGroupFrame();
+                main_context.current_group_ptr = group_frame.previous_group_ptr;
             },
             .atomic_start => {},
             .atomic_end => {},
@@ -446,9 +430,34 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             main_context.ip += 1; // don't skip past the instruction that was just set.
         }
     }
-    // Failed matching contents.
-    if (main_context.groups) |grps| {
-        allocator.free(grps); // free the groups if there is no error but match fails.
+    return null;
+}
+
+pub fn match(allocator: anytype, bytecode: []codegen.Instruction, string: []const u8) !?SlicedMatch {
+    var test_start_ptr: usize = 0;
+    var main_context = try VMExecutionContext.init(allocator, test_start_ptr);
+    defer main_context.deinit(allocator); // Should deinit the stack and the groups array.
+    switch (bytecode[0]) {
+        .allocate_groups => |alloc_instr| {
+            // std.debug.print("allocating groups\n", .{});
+            if (main_context.groups) |_| {
+                return core_types.VMError.InvalidGroupAllocation;
+            } else {
+                main_context.groups = try allocator.alloc(MatchGroup, alloc_instr.size);
+            }
+        },
+        else => {
+            return core_types.VMError.InvalidStackArrangement; // bytecode[0] should be alloc_groups instruction.
+        },
+    }
+    while (test_start_ptr < string.len) : (test_start_ptr += 1) {
+        main_context.ip = 1; // ensure to reset ip every time. ip index 0 should be the ALLOC_GROUPS() instruction, which is run only once at the start.
+        main_context.str_ptr = test_start_ptr;
+        main_context.current_group_ptr = null;
+        const current_match = try internal_match(allocator, &main_context, bytecode, string);
+        if (current_match) |success| { // check the match value for null
+            return try match_index_correlate(allocator, string, success);
+        }
     }
     return null;
 }
