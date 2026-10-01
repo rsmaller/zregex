@@ -36,10 +36,17 @@ const GroupStackFrame = struct {
     previous_group_ptr: ?usize, // the index that points to the previous group frame.
 };
 
+const LookaheadStackFrame = struct {
+    saved_str_ptr: usize,
+    negative: bool,
+    jmp: ?usize,
+};
+
 const StackFrame = union(enum) {
     choice_point: ChoicePointStackFrame,
     repeat: RepeatStackFrame,
     group: GroupStackFrame,
+    lookahead: LookaheadStackFrame,
 };
 
 fn Stack(T: type) type {
@@ -95,6 +102,10 @@ fn Stack(T: type) type {
 }
 
 const VMMainStack = Stack(StackFrame);
+
+const BacktrackOptions = struct {
+    allow_across_lookthroughs: bool, // prevents always allowing backtracks to a negative lookthrough frame to succeed if the backtrack is triggered by a negative end instruction.
+};
 
 const VMExecutionContext = struct {
     stack: VMMainStack,
@@ -162,7 +173,7 @@ const VMExecutionContext = struct {
             return core_types.VMError.NullIndexAccess;
         }
     }
-    pub fn backtrack(self: *@This(), allocator: anytype) !bool { // Returns false when there is no fallback.
+    pub fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !bool { // Returns false when there is no fallback.
         std.debug.print("BACKTRACKING!!!\n", .{});
         while (self.stack.hasItem()) {
             const current_item = try self.stack.pop(allocator);
@@ -178,6 +189,19 @@ const VMExecutionContext = struct {
                     (try self.currentRepFrameReference()).current_count = choice.previous_count;
                     self.jmp(choice.backtrack_ip);
                     return true; // no failure incurred when backtracking has a fallback.
+                },
+                .lookahead => |look| {
+                    if (look.negative and options.allow_across_lookthroughs) {
+                        if (look.jmp) |look_jmp| {
+                            std.debug.print("Jumping out of negative; succeeded!\n", .{});
+                            self.str_ptr = look.saved_str_ptr;
+                            self.jmp(look_jmp + 1);
+                            return true; // did NOT incur a failing state.
+                        } else {
+                            return core_types.VMError.NullIndexAccess;
+                        }
+                        // jump past end instruction; past the end instruction should only be reached when neg lookahead "fails".
+                    }
                 },
             }
         }
@@ -375,7 +399,8 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                         main_context.str_ptr += 1;
                     }
                 } else {
-                    if (!try main_context.backtrack(allocator)) {
+                    std.debug.print("Backtracking from literal\n", .{});
+                    if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
                     }
                 }
@@ -406,19 +431,44 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .atomic_start => {},
             .atomic_end => {},
-            .lookahead_start => {},
-            .lookahead_end => {},
+            .lookahead_start => {
+                try main_context.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = main_context.str_ptr, .negative = false, .jmp = null } });
+            },
+            .lookahead_end => {
+                var lookahead_frame_found: bool = false;
+                while (main_context.stack.hasItem()) {
+                    const current = try main_context.stack.pop(allocator);
+                    switch (current) {
+                        .lookahead => |look| {
+                            main_context.str_ptr = look.saved_str_ptr;
+                            lookahead_frame_found = true;
+                            break; // Breaks out of the while loop when the frame is found.
+                        },
+                        else => {},
+                    }
+                }
+                if (!lookahead_frame_found) {
+                    return core_types.VMError.InvalidStackArrangement;
+                }
+            },
             .lookbehind_start => {},
             .lookbehind_end => {},
-            .neg_lookahead_start => {},
-            .neg_lookahead_end => {},
+            .neg_lookahead_start => |jmp| {
+                try main_context.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = main_context.str_ptr, .negative = true, .jmp = jmp } });
+            },
+            .neg_lookahead_end => { // if this is reached that means the inside matched, which means the assertion failed, so backtrack.
+                if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = false })) {
+                    std.debug.print("LOOKAHEAD NEG FAIL!!!\n", .{});
+                    return null;
+                }
+            },
             .neg_lookbehind_start => {},
             .neg_lookbehind_end => {},
             .class => |class| {
                 if (class_match(class, string, main_context.str_ptr)) {
                     main_context.str_ptr += 1;
                 } else {
-                    if (!try main_context.backtrack(allocator)) {
+                    if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
                     }
                 }

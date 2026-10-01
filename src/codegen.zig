@@ -41,7 +41,7 @@ pub const Instruction = union(enum) {
     lookahead_end: void,
     lookbehind_start: usize,
     lookbehind_end: usize,
-    neg_lookahead_start: void,
+    neg_lookahead_start: usize,
     neg_lookahead_end: void,
     neg_lookbehind_start: usize,
     neg_lookbehind_end: usize,
@@ -198,10 +198,11 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         .lookahead => {
                             if (grp.negated) {
                                 try emitLabel(allocator, labels, instruction_ptr);
-                                _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .neg_lookahead_start, instruction_ptr);
+                                const start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .neg_lookahead_start = 0 }, instruction_ptr);
                                 try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
                                 try emitLabel(allocator, labels, instruction_ptr);
-                                _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .neg_lookahead_end, instruction_ptr);
+                                const end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .neg_lookahead_end, instruction_ptr);
+                                instructions.items[start_index].neg_lookahead_start = end_index;
                             } else {
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .lookahead_start, instruction_ptr);
@@ -274,4 +275,3 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
         .epsilon => {},
     }
 }
-

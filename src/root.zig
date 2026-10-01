@@ -90,8 +90,8 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
             .lookbehind_end => |len| {
                 try out_interface.print("LOOKBEHIND_END(len={d})\n", .{len});
             },
-            .neg_lookahead_start => {
-                try out_interface.print("NEG_LOOKAHEAD_START\n", .{});
+            .neg_lookahead_start => |jmp| {
+                try out_interface.print("NEG_LOOKAHEAD_START({d})\n", .{jmp});
             },
             .neg_lookahead_end => {
                 try out_interface.print("NEG_LOOKAHEAD_END\n", .{});
@@ -264,4 +264,3 @@ fn printLeafAtom(out_interface: anytype, leaf: core_types.LeafAtomNode) !void { 
         },
     }
 }
-
