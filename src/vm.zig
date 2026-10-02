@@ -451,8 +451,27 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                     return core_types.VMError.InvalidStackArrangement;
                 }
             },
-            .lookbehind_start => {},
-            .lookbehind_end => {},
+            .lookbehind_start => |len| {
+                try main_context.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = main_context.str_ptr, .negative = false, .jmp = null } });
+                main_context.str_ptr -= if (main_context.str_ptr >= len) len else main_context.str_ptr;
+            },
+            .lookbehind_end => {
+                var lookahead_frame_found: bool = false;
+                while (main_context.stack.hasItem()) {
+                    const current = try main_context.stack.pop(allocator);
+                    switch (current) {
+                        .lookahead => |look| {
+                            main_context.str_ptr = look.saved_str_ptr;
+                            lookahead_frame_found = true;
+                            break; // Breaks out of the while loop when the frame is found.
+                        },
+                        else => {},
+                    }
+                }
+                if (!lookahead_frame_found) {
+                    return core_types.VMError.InvalidStackArrangement;
+                }
+            },
             .neg_lookahead_start => |jmp| {
                 try main_context.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = main_context.str_ptr, .negative = true, .jmp = jmp } });
             },
@@ -462,8 +481,16 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                     return null;
                 }
             },
-            .neg_lookbehind_start => {},
-            .neg_lookbehind_end => {},
+            .neg_lookbehind_start => |neg_lookbehind| {
+                try main_context.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = main_context.str_ptr, .negative = true, .jmp = neg_lookbehind.jmp } });
+                main_context.str_ptr -= if (main_context.str_ptr >= neg_lookbehind.len) neg_lookbehind.len else main_context.str_ptr;
+            },
+            .neg_lookbehind_end => {
+                if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = false })) {
+                    std.debug.print("LOOKAHEAD NEG FAIL!!!\n", .{});
+                    return null;
+                }
+            },
             .class => |class| {
                 if (class_match(class, string, main_context.str_ptr)) {
                     main_context.str_ptr += 1;

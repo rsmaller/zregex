@@ -87,20 +87,20 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
             .lookbehind_start => |len| {
                 try out_interface.print("LOOKBEHIND_START(len={d})\n", .{len});
             },
-            .lookbehind_end => |len| {
-                try out_interface.print("LOOKBEHIND_END(len={d})\n", .{len});
+            .lookbehind_end => {
+                try out_interface.print("LOOKBEHIND_END\n", .{});
             },
             .neg_lookahead_start => |jmp| {
-                try out_interface.print("NEG_LOOKAHEAD_START({d})\n", .{jmp});
+                try out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp});
             },
             .neg_lookahead_end => {
                 try out_interface.print("NEG_LOOKAHEAD_END\n", .{});
             },
-            .neg_lookbehind_start => |len| {
-                try out_interface.print("NEG_LOOKBEHIND_START(len={d})\n", .{len});
+            .neg_lookbehind_start => |neg_lookbehind| {
+                try out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{neg_lookbehind.len, neg_lookbehind.jmp});
             },
-            .neg_lookbehind_end => |len| {
-                try out_interface.print("NEG_LOOKBEHIND_END(len={d})\n", .{len});
+            .neg_lookbehind_end => {
+                try out_interface.print("NEG_LOOKBEHIND_END\n", .{});
             },
         }
     }
