@@ -28,6 +28,7 @@ pub const Instruction = union(enum) {
         min: usize,
         max: core_types.RepetitionBoundType,
         mode: core_types.RepeaterType,
+        escape_jmp: usize,
     },
     repeat_end: usize,
     jmp: usize,
@@ -150,9 +151,10 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
         },
         .repetition => |rep| {
-            const rep_start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_start = .{ .min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type } }, instruction_ptr);
+            const rep_start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_start = .{ .min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type, .escape_jmp = 0 } }, instruction_ptr);
             try emitRecursive(allocator, labels, instructions, fixups, rep.child, instruction_ptr, recursion_level + 1);
-            _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index + 1 }, instruction_ptr); // Repeat_end must just jump past the repeat_start instruction, to the next one, which may or may not be the repeat_end instruction itself.
+            const rep_end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index + 1 }, instruction_ptr); // Repeat_end must just jump past the repeat_start instruction, to the next one, which may or may not be the repeat_end instruction itself.
+            instructions.items[rep_start_index].repeat_start.escape_jmp = rep_end_index + 1; // for possessive matching frames to escape repetition when backtracking is attempted in range.
             try emitLabel(allocator, labels, instruction_ptr);
         },
         .alternation => |alt| {

@@ -45,10 +45,10 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
             .repeat_start => |rep| {
                 switch (rep.max) {
                     .bounded => {
-                        try out_interface.print("REP_START(min={d}, max={d}, {s})\n", .{ rep.min, rep.max.bounded, @tagName(rep.mode) });
+                        try out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) });
                     },
                     .unbounded => {
-                        try out_interface.print("REP_START(min={d}, max=inf, {s})\n", .{ rep.min, @tagName(rep.mode) });
+                        try out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) });
                     },
                 }
             },

@@ -22,6 +22,7 @@ const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecod
     mode: core_types.RepeaterType,
     previous_rep_ptr: ?usize,
     current_count: usize,
+    escape_jmp: usize,
 };
 
 const ChoicePointStackFrame = struct {
@@ -179,10 +180,23 @@ const VMExecutionContext = struct {
             const current_item = try self.stack.pop(allocator);
             switch (current_item) {
                 .group => |grp| {
-                    self.current_group_ptr = grp.previous_group_ptr; // null check here; may not be necessary?
+                    self.current_group_ptr = grp.previous_group_ptr;
                 },
                 .repeat => |rep| {
-                    self.current_rep_ptr = rep.previous_rep_ptr;
+                    const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
+                    switch (rep.mode) {
+                        .greedy => { self.current_rep_ptr = rep.previous_rep_ptr; },
+                        .lazy => { self.current_rep_ptr = rep.previous_rep_ptr; },
+                        .possessive => { // Exit repetition if within range; otherwise fail the match.
+                            if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min ) {
+                                self.jmp(rep.escape_jmp);
+                                return true;
+                            } else {
+                                return false;
+                            }
+                        },
+                    }
+
                 },
                 .choice_point => |choice| {
                     self.str_ptr = choice.backtrack_str_ptr;
@@ -253,13 +267,30 @@ pub fn match_index_correlate(allocator: anytype, string: []const u8, match_item:
     return SlicedMatch{ .groups = group_arr };
 }
 
-fn repetition_count_lt(count: usize, max: core_types.RepetitionBoundType) bool {
+const ComparisonType = enum {
+    LT,
+    LE,
+    EQ,
+    GT,
+    GE
+};
+
+fn repetition_count_cmp(count: usize, max: core_types.RepetitionBoundType, cmp: ComparisonType) bool {
     switch (max) {
         .bounded => |bounded_max| {
-            return count < bounded_max;
+            switch (cmp) {
+                .LT => { return count < bounded_max; },
+                .LE => { return count <= bounded_max; },
+                .EQ => { return count == bounded_max; },
+                .GT => { return count > bounded_max; },
+                .GE => { return count >= bounded_max; },
+            }
         },
         .unbounded => {
-            return true;
+            switch(cmp) {
+                .LT, .LE => { return true; },
+                .GT, .GE, .EQ => { return false; },
+            }
         },
     }
 }
@@ -277,7 +308,7 @@ const ConditionalConsumingMatch = struct {
 };
 
 fn literal_match(literal: anytype, string: []const u8, index: usize) ConditionalConsumingMatch {
-    if (index > string.len) {
+    if (index > string.len) { // Not >=. == string.len is sometimes used for certain assertions.
         return .{ .matching = false, .consuming = false };
     }
     var matching = false;
@@ -313,10 +344,12 @@ fn literal_match(literal: anytype, string: []const u8, index: usize) Conditional
         .whitespace => {
             matching = isWhitespace(string, index);
         },
-        .start_anchor => {
+        .start_anchor => { // Start and end anchors default to multiline matching.
+            matching = index == 0 or string[index - 1] == '\n';
             consuming = false;
         },
         .end_anchor => {
+            matching = index == string.len or ((index + 1) < string.len and string[index + 1] == '\n');
             consuming = false;
         },
         .any => {
@@ -346,21 +379,25 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
             return core_types.BytecodeGenError.UnexpectedBytecodeType;
         },
     }
-    if (try main_context.currentCount() < min) {
+    const current_count = try main_context.currentCount();
+    if (current_count < min) {
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
+    } else if (repetition_count_cmp(current_count, max, .GE)) {
+        main_context.current_rep_ptr = (try main_context.currentRepFrameReference()).previous_rep_ptr; // set to previous rep frame when exiting.
+        main_context.jmp(main_context.ip + 1);
     } else {
         switch (mode) {
             .greedy => {
-                if (repetition_count_lt(try main_context.currentCount(), max)) {
-                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
-                    main_context.jmp(jump_index);
-                } else {
-                    main_context.current_rep_ptr = (try main_context.currentRepFrameReference()).previous_rep_ptr; // set to previous rep frame when exiting.
-                    main_context.jmp(main_context.ip + 1);
-                }
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
+                main_context.jmp(jump_index);
             },
-            .lazy => {},
-            .possessive => {},
+            .lazy => {
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
+                main_context.jmp(main_context.ip + 1);
+            },
+            .possessive => {
+                main_context.jmp(jump_index);
+            },
         }
     }
 }
@@ -380,7 +417,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .repeat_start => |rep| {
                 // std.debug.print("starting repetition\n", .{});
-                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0 } });
+                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0, .escape_jmp = rep.escape_jmp } });
                 main_context.current_rep_ptr = main_context.stack.size - 1;
             },
             .repeat_end => |end| {
