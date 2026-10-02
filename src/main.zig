@@ -24,7 +24,7 @@ pub fn main(init: std.process.Init) !void {
     // const pattern = "[abc]";
     // const pattern = "(?<=abc|xyz)";
     // const pattern = "\\w{2,4}(\\w{3,6})\\w{2}(\\w{3})";
-    const pattern = ".{2}$";
+    const pattern = "\\w(?>\\w{2})";
     const compiledPattern = try zregex.compile(allocator, pattern);
     defer zregex.destroyPattern(allocator, compiledPattern) catch @panic("Could not free compiled pattern!");
     try stdout.print("Pattern: {s}\n", .{pattern});

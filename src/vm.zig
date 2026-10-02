@@ -48,6 +48,7 @@ const StackFrame = union(enum) {
     repeat: RepeatStackFrame,
     group: GroupStackFrame,
     lookahead: LookaheadStackFrame,
+    atomic: void, // doesn't have to do anything for now.
 };
 
 fn Stack(T: type) type {
@@ -216,6 +217,9 @@ const VMExecutionContext = struct {
                         }
                         // jump past end instruction; past the end instruction should only be reached when neg lookahead "fails".
                     }
+                },
+                .atomic => {
+                    return false;
                 },
             }
         }
@@ -466,8 +470,25 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 const group_frame = try main_context.currentGroupFrame();
                 main_context.current_group_ptr = group_frame.previous_group_ptr;
             },
-            .atomic_start => {},
-            .atomic_end => {},
+            .atomic_start => {
+                try main_context.stack.push(allocator, .atomic);
+            },
+            .atomic_end => {
+                var atomic_frame_found: bool = false;
+                while (main_context.stack.hasItem()) {
+                    const current = try main_context.stack.pop(allocator);
+                    switch (current) {
+                        .atomic => {
+                            atomic_frame_found = true;
+                            break; // Breaks out of the while loop when the frame is found.
+                        },
+                        else => {},
+                    }
+                }
+                if (!atomic_frame_found) {
+                    return core_types.VMError.InvalidStackArrangement;
+                }
+            },
             .lookahead_start => {
                 try main_context.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = main_context.str_ptr, .negative = false, .jmp = null } });
             },
