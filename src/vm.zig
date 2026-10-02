@@ -30,6 +30,7 @@ const ChoicePointStackFrame = struct {
     stack_depth: usize,
     backtrack_str_ptr: usize,
     previous_count: usize,
+    previous_rep_ptr: ?usize,
 };
 
 const GroupStackFrame = struct {
@@ -138,7 +139,7 @@ const VMExecutionContext = struct {
         self.ip = jmp_point;
         self.jmp_queued = true;
     }
-    pub fn currentRepFrameReference(self: *@This()) !*RepeatStackFrame {
+    pub fn currentRepFrameReference(self: *@This()) !?*RepeatStackFrame {
         if (self.current_rep_ptr) |rep_ptr| {
             switch ((try self.stack.fetchPtrAtIndex(rep_ptr)).*) {
                 .repeat => |*rep| {
@@ -149,11 +150,14 @@ const VMExecutionContext = struct {
                 },
             }
         } else {
-            return core_types.VMError.NullIndexAccess;
+            return null;
         }
     }
     pub fn currentCount(self: *@This()) !usize {
-        return (try self.currentRepFrameReference()).current_count;
+        if (try self.currentRepFrameReference()) |frame_ref| {
+            return frame_ref.current_count;
+        }
+        return core_types.VMError.NullIndexAccess;
     }
     pub fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of the frame representing the current group.
         switch (try self.stack.fetchAtIndex(try unpack_index_panic(self.current_group_ptr))) {
@@ -176,7 +180,6 @@ const VMExecutionContext = struct {
         }
     }
     pub fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !bool { // Returns false when there is no fallback.
-        std.debug.print("BACKTRACKING!!!\n", .{});
         while (self.stack.hasItem()) {
             const current_item = try self.stack.pop(allocator);
             switch (current_item) {
@@ -201,7 +204,12 @@ const VMExecutionContext = struct {
                 },
                 .choice_point => |choice| {
                     self.str_ptr = choice.backtrack_str_ptr;
-                    (try self.currentRepFrameReference()).current_count = choice.previous_count;
+                    self.current_rep_ptr = choice.previous_rep_ptr;
+                    if (try self.currentRepFrameReference()) |frame_ref| { // Don't null error if there is no frame; there may be no current counter.
+                        frame_ref.current_count = choice.previous_count;
+                    } else {
+                        std.debug.print("Choice point previous count not set: {d}\n", .{choice.previous_count});
+                    }
                     self.jmp(choice.backtrack_ip);
                     return true; // no failure incurred when backtracking has a fallback.
                 },
@@ -367,36 +375,33 @@ fn literal_match(literal: anytype, string: []const u8, index: usize) Conditional
     return .{ .matching = matching, .consuming = consuming };
 }
 
-fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, bytecode: []codegen.Instruction, jump_index: usize) !void {
+fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, jump_index: usize) !void {
     // std.debug.print("ending repetition\n", .{});
-    var min: usize = undefined;
-    var max: core_types.RepetitionBoundType = undefined;
-    var mode: core_types.RepeaterType = undefined;
-    (try main_context.currentRepFrameReference()).current_count += 1;
-    switch (bytecode[jump_index - 1]) { // switch on the data the repetition_end refers to.
-        .repeat_start => |rep_instr| {
-            min = rep_instr.min;
-            max = rep_instr.max;
-            mode = rep_instr.mode;
-        },
-        else => {
-            return core_types.BytecodeGenError.UnexpectedBytecodeType;
-        },
+
+    var current_frame_ref: *RepeatStackFrame = undefined;
+    if (try main_context.currentRepFrameReference()) |frame_ref| {
+        current_frame_ref = frame_ref;
+    } else {
+        return core_types.VMError.NullIndexAccess;
     }
+    current_frame_ref.current_count += 1;
+    const min: usize = current_frame_ref.min;
+    const max: core_types.RepetitionBoundType = current_frame_ref.max;
+    const mode: core_types.RepeaterType = current_frame_ref.mode;
     const current_count = try main_context.currentCount();
     if (current_count < min) {
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
     } else if (repetition_count_cmp(current_count, max, .GE)) {
-        main_context.current_rep_ptr = (try main_context.currentRepFrameReference()).previous_rep_ptr; // set to previous rep frame when exiting.
+        main_context.current_rep_ptr = current_frame_ref.previous_rep_ptr; // set to previous rep frame when exiting.
         main_context.jmp(main_context.ip + 1);
     } else {
         switch (mode) {
             .greedy => {
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 main_context.jmp(jump_index);
             },
             .lazy => {
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 main_context.jmp(main_context.ip + 1);
             },
             .possessive => {
@@ -416,17 +421,20 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .split => |split_instr| {
                 // std.debug.print("doing split\n", .{});
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()) } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 main_context.ip = split_instr.left;
             },
             .repeat_start => |rep| {
                 // std.debug.print("starting repetition\n", .{});
                 try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0, .escape_jmp = rep.escape_jmp } });
                 main_context.current_rep_ptr = main_context.stack.size - 1;
+                if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
+                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
+                } // repeat_end points to the instruction after the repeat_start, which is the instruction in the context here.
             },
             .repeat_end => |end| {
                 // std.debug.print("ending repetition\n", .{});
-                try repeat_next_iteration(allocator, main_context, bytecode, end);
+                try repeat_next_iteration(allocator, main_context, end);
             },
             .jmp => |jmp_instr| {
                 // std.debug.print("jumping\n", .{});
@@ -440,7 +448,6 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                         main_context.str_ptr += 1;
                     }
                 } else {
-                    std.debug.print("Backtracking from literal\n", .{});
                     if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
                     }
