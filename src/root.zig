@@ -6,13 +6,7 @@ pub const codegen = @import("codegen.zig");
 pub const core_util = @import("core_util.zig");
 pub const vm = @import("vm.zig");
 
-pub const Pattern = struct {
-    ast: ?core_types.AST,
-    bytecode: []codegen.Instruction,
-    pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !?Match {
-        return try vm.match(allocator, self.bytecode, string);
-    }
-};
+pub const Pattern = core_types.Pattern;
 
 pub const Match = vm.SlicedMatch;
 
@@ -22,6 +16,7 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!Pattern {
     const sized_ast = try parser.compile(allocator, str_to_parse);
     return Pattern{
         .ast = sized_ast.ast,
+        .map = try codegen.mapNames(allocator, sized_ast.ast),
         .bytecode = try codegen.emit(allocator, sized_ast.ast, sized_ast.group_count),
     };
 }
@@ -29,10 +24,16 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!Pattern {
 pub fn printAST(out_interface: anytype, ast: core_types.AST, options: core_types.ASTPrintOptions) !void {
     try printASTRecursive(out_interface, ast, options, 0);
 }
-pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []codegen.Instruction) !void {
+pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []core_types.Instruction) !void {
     for (0..bytecode.len) |i| {
         try out_interface.print("{d}:\t", .{i});
         switch (bytecode[i]) {
+            .header_start => {
+                try out_interface.print("HEADER_START\n", .{});
+            },
+            .header_end => {
+                try out_interface.print("HEADER_END\n", .{});
+            },
             .allocate_groups => |alloc| {
                 try out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size});
             },
@@ -106,13 +107,6 @@ pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []cod
     }
 }
 
-pub fn destroyPattern(allocator: anytype, pattern: Pattern) !void {
-    if (pattern.ast) |ast| {
-        try parser.destroyAST(allocator, ast);
-    }
-    allocator.free(pattern.bytecode);
-}
-
 // Internals.
 fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, options: core_types.ASTPrintOptions, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
@@ -181,10 +175,13 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, opt
         .epsilon => {
             try out_interface.print("EPSILON()\n", .{});
         },
+        .failed_parse => {
+            try out_interface.print("FAILED_PARSE()\n", .{});
+        },
     }
 }
 
-fn printLiteralInstruction(out_interface: anytype, instruction: codegen.LiteralInstruction) !void { // prints leaf of AST or bytecode.
+fn printLiteralInstruction(out_interface: anytype, instruction: core_types.LiteralInstruction) !void { // prints leaf of AST or bytecode.
     switch (instruction.data) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;

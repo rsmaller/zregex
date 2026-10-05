@@ -2,65 +2,56 @@ const std = @import("std");
 const core_types = @import("core_types.zig");
 const core_util = @import("core_util.zig");
 
-pub const LiteralInstruction = struct {
-    inverted: bool,
-    data: union(enum) {
-        generic: u8,
-        digit: void,
-        word: void,
-        word_boundary: void,
-        whitespace: void,
-        start_anchor: void,
-        end_anchor: void,
-        any: void,
-    },
-};
+pub fn mapNames(allocator: anytype, ast: *const core_types.ASTNode) !core_types.NameIDMap {
+    var name_to_id_map = std.StringHashMap(usize).init(allocator);
+    var id_to_name_map = std.AutoHashMap(usize, []const u8).init(allocator);
+    try mapNamesRecursive(allocator, &name_to_id_map, &id_to_name_map, ast);
+    return .{ .name_to_id_map = name_to_id_map, .id_to_name_map = id_to_name_map };
+}
 
-pub const Instruction = union(enum) {
-    allocate_groups: struct {
-        size: usize,
-    },
-    split: struct {
-        left: usize,
-        right: usize,
-    },
-    repeat_start: struct {
-        min: usize,
-        max: core_types.RepetitionBoundType,
-        mode: core_types.RepeaterType,
-        escape_jmp: usize,
-    },
-    repeat_end: usize,
-    jmp: usize,
-    literal: LiteralInstruction,
-    end_match: void,
-    capture_start: usize,
-    capture_end: usize,
-    atomic_start: void,
-    atomic_end: void,
-    lookahead_start: void,
-    lookahead_end: void,
-    lookbehind_start: usize,
-    lookbehind_end: void,
-    neg_lookahead_start: usize,
-    neg_lookahead_end: void,
-    neg_lookbehind_start: struct {
-        len: usize,
-        jmp: usize,
-    },
-    neg_lookbehind_end: void,
-    class: u256, // binary-optimized for every 8-bit character.
-};
+pub fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usize), id_to_name_map: *std.AutoHashMap(usize, []const u8), ast: *const core_types.ASTNode) !void {
+    switch(ast.*) {
+        .leaf_atom => {},
+        .concatenation => |concat| {
+            for (concat.parts) |part| {
+                try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, part);
+            }
+        },
+        .alternation => |alt| {
+            for (alt.parts) |part| {
+                try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, part);
+            }
+        },
+        .group => |grp| {
+            if (grp.name) |name| {
+                if (grp.id) |id| {
+                    try name_to_id_map.put(name, id);
+                    try id_to_name_map.put(id, name);
+                } else {
+                    return core_types.BytecodeGenError.InvalidGroupID;
+                }
+            }
+            try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, grp.expr);
+        },
+        .repetition => |rep| {
+            try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, rep.child);
+        },
+        .class => {},
+        .epsilon, .failed_parse => {},
+    }
+}
 
-pub fn emit(allocator: anytype, ast: *const core_types.ASTNode, group_count: usize) ![]Instruction {
+pub fn emit(allocator: anytype, ast: *const core_types.ASTNode, group_count: usize) ![]core_types.Instruction {
     var labels: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
     defer labels.deinit(allocator);
     var fixups: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
     defer fixups.deinit(allocator);
-    var instructions: std.ArrayList(Instruction) = try std.ArrayList(Instruction).initCapacity(allocator, 8);
+    var instructions: std.ArrayList(core_types.Instruction) = try std.ArrayList(core_types.Instruction).initCapacity(allocator, 8);
     defer instructions.deinit(allocator);
     var instruction_index: usize = 0;
+    _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .header_start, &instruction_index);
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .{ .allocate_groups = .{ .size = group_count } }, &instruction_index); // always allocate array for match groups first.
+    _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .header_end, &instruction_index);
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .{ .capture_start = 0 }, &instruction_index);
     try emitLabel(allocator, &labels, &instruction_index);
     try emitRecursive(allocator, &labels, &instructions, &fixups, ast, &instruction_index, 0);
@@ -72,7 +63,7 @@ pub fn emit(allocator: anytype, ast: *const core_types.ASTNode, group_count: usi
 }
 
 // Replaces JMP and SPLIT instruction label values with actual bytecode-pointing values.
-fn propagateFixups(fixups: []usize, labels: []usize, instructions: []Instruction) !void {
+fn propagateFixups(fixups: []usize, labels: []usize, instructions: []core_types.Instruction) !void {
     for (0..fixups.len) |i| {
         const current = fixups[i];
         switch (instructions[current]) {
@@ -92,7 +83,7 @@ fn emitLabel(allocator: anytype, labels: *std.ArrayList(usize), instruction_ptr:
     try labels.append(allocator, instruction_ptr.*);
 }
 
-fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(Instruction), fixups: *std.ArrayList(usize), permit_fixups: struct { permit_fixups: bool }, data: Instruction, index_ptr: *usize) !usize {
+fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(core_types.Instruction), fixups: *std.ArrayList(usize), permit_fixups: struct { permit_fixups: bool }, data: core_types.Instruction, index_ptr: *usize) !usize {
     try instructions.append(allocator, data);
     index_ptr.* += 1;
     if (permit_fixups.permit_fixups) {
@@ -110,8 +101,8 @@ fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(Instruction)
     return index_ptr.* - 1;
 }
 
-fn leafToLiteralInstruction(leaf: core_types.LeafAtomNode) !LiteralInstruction {
-    var ret: LiteralInstruction = undefined;
+fn leafToLiteralInstruction(leaf: core_types.LeafAtomNode) !core_types.LiteralInstruction {
+    var ret: core_types.LiteralInstruction = undefined;
     ret.inverted = leaf.inverted;
     switch (leaf.leaf_atom) {
         .any => {
@@ -145,7 +136,7 @@ fn leafToLiteralInstruction(leaf: core_types.LeafAtomNode) !LiteralInstruction {
     return ret;
 }
 
-fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(Instruction), fixups: *std.ArrayList(usize), ast: *const core_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
+fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(core_types.Instruction), fixups: *std.ArrayList(usize), ast: *const core_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
     switch (ast.*) {
         .leaf_atom => |leaf| {
             _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
@@ -278,6 +269,6 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             }
             _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .class = accepted_chars }, instruction_ptr);
         },
-        .epsilon => {},
+        .epsilon, .failed_parse => {},
     }
 }

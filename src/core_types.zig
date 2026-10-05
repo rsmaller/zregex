@@ -1,6 +1,118 @@
 // The core file which contains the primary types for parser-generated ASTs and errors, parsing or otherwise.
 const std = @import("std");
 const type_reflection = @import("type_reflection.zig");
+const vm = @import("vm.zig");
+
+pub const Pattern = struct {
+    ast: ?AST,
+    map: NameIDMap,
+    bytecode: []Instruction,
+    pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !?SlicedMatch {
+        return try vm.match(allocator, self, string);
+    }
+    pub fn deinit(pattern: *@This(), allocator: anytype) void {
+        if (pattern.ast) |ast| {
+            destroyAST(allocator, ast);
+        }
+        allocator.free(pattern.bytecode);
+        pattern.map.name_to_id_map.deinit();
+        pattern.map.id_to_name_map.deinit();
+    }
+    pub fn getIdByName(self: *const @This(), name: []const u8) ?usize {
+        return self.map.name_to_id_map.get(name);
+    }
+    pub fn getNameById(self: *const @This(), id: usize) ?[]const u8 {
+        return self.map.id_to_name_map.get(id);
+    }
+};
+
+pub const SlicedMatch = struct {
+    groups: []?[]const u8,
+    pattern_ptr: *const Pattern,
+    pub fn deinit(self: *const @This(), allocator: anytype) void {
+        for (self.groups) |grp| {
+            if (grp) |non_null_grp| {
+                allocator.free(non_null_grp);
+            }
+        }
+        allocator.free(self.groups);
+    }
+    pub fn getMatchFromName(self: *const @This(), name: []const u8) ?[]const u8 {
+        if (self.pattern_ptr.getIdByName(name)) |id| {
+            return self.groups[id];
+        }
+        return null;
+    }
+    pub fn getMatchFromId(self: *const @This(), id: usize) ?[]const u8 {
+        return self.groups[id];
+    }
+};
+
+pub const Match = struct {
+    groups: []const ?MatchGroup,
+};
+
+pub const MatchGroup = struct {
+    start: usize, // Slices of original string passed in.
+    end: usize,
+};
+
+pub const NameIDMap = struct {
+    name_to_id_map: std.StringHashMap(usize),
+    id_to_name_map: std.AutoHashMap(usize, []const u8),
+};
+
+pub const LiteralInstruction = struct {
+    inverted: bool,
+    data: union(enum) {
+        generic: u8,
+        digit: void,
+        word: void,
+        word_boundary: void,
+        whitespace: void,
+        start_anchor: void,
+        end_anchor: void,
+        any: void,
+    },
+};
+
+pub const Instruction = union(enum) {
+    header_start: void,
+    allocate_groups: struct {
+        size: usize,
+    },
+    header_end: void,
+    split: struct {
+        left: usize,
+        right: usize,
+    },
+    repeat_start: struct {
+        min: usize,
+        max: RepetitionBoundType,
+        mode: RepeaterType,
+        escape_jmp: usize,
+    },
+    repeat_end: usize,
+    jmp: usize,
+    literal: LiteralInstruction,
+    end_match: void,
+    capture_start: usize,
+    capture_end: usize,
+    atomic_start: void,
+    atomic_end: void,
+    lookahead_start: void,
+    lookahead_end: void,
+    lookbehind_start: usize,
+    lookbehind_end: void,
+    neg_lookahead_start: usize,
+    neg_lookahead_end: void,
+    neg_lookbehind_start: struct {
+        len: usize,
+        jmp: usize,
+    },
+    neg_lookbehind_end: void,
+    class: u256, // binary-optimized for every 8-bit character.
+};
 
 pub const AST = *const ASTNode;
 
@@ -74,14 +186,17 @@ pub const GroupNode = struct {
     expr: *ASTNode,
     id: ?usize,
     name: ?[]const u8, // Not nested in GroupNode for simplicity.
-    type: union(enum) { capturing: union(enum) {
-        generic,
-    }, non_capturing: union(enum) {
-        generic: void,
-        atomic: void,
-        lookahead: void,
-        lookbehind: usize,
-    } },
+    type: union(enum) {
+        capturing: union(enum) {
+            generic,
+        },
+        non_capturing: union(enum) {
+            generic: void,
+            atomic: void,
+            lookahead: void,
+            lookbehind: usize,
+        }
+    },
     negated: bool,
     pub fn equals(self: *const GroupNode, other: GroupNode) bool {
         if (@intFromEnum(self.type) != @intFromEnum(other.type)) {
@@ -209,6 +324,7 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     repetition: RepetitionNode,
     class: ClassNode,
     epsilon: void, // Generic empty node.
+    failed_parse: void,
     pub fn equals(self: *const ASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
         comptime {
             if (type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
@@ -251,16 +367,50 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
                 }
             },
             .epsilon => {}, // Epsilons contain no data and are always the same.
+            .failed_parse => {},
         }
         return true;
     }
 };
+
+pub fn destroyAST(allocator: anytype, pattern: AST) void {
+    switch (pattern.*) {
+        .leaf_atom => {},
+        .alternation => |alt| {
+            for (alt.parts) |item| {
+                destroyAST(allocator, item);
+            }
+            allocator.free(alt.parts);
+        },
+        .concatenation => |concat| {
+            for (concat.parts) |item| {
+                destroyAST(allocator, item);
+            }
+            allocator.free(concat.parts);
+        },
+        .group => |grp| {
+            destroyAST(allocator, grp.expr);
+        },
+        .repetition => |rep| {
+            destroyAST(allocator, rep.child);
+        },
+        .class => |class_item| {
+            allocator.free(class_item.items);
+        },
+        .epsilon, .failed_parse => {
+            return;
+        }, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
+    }
+    allocator.destroy(pattern);
+}
+
 
 pub const ParsingError = error{
     TokenNotFound,
     EndOfString,
     InvalidRange,
     VariableLookbehindRange,
+    InvalidGroupName,
 };
 
 pub const BytecodeGenError = error{
@@ -278,6 +428,7 @@ pub const StackError = error{
 pub const VMError = error{
     InvalidGroupAllocation,
     InvalidStackArrangement,
+    BadHeaderScan,
     FailedMatch,
     NullIndexAccess,
 };
