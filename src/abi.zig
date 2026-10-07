@@ -26,6 +26,7 @@ pub export fn zregex_compile(str_to_parse: [*:0]u8) callconv(.c) ?PatternHandle 
         return null;
     };
     const ret = allocator.create(zregex.Pattern) catch {
+        pattern.deinit();
         return null;
     };
     ret.* = pattern;
