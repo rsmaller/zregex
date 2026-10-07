@@ -177,10 +177,14 @@ const VMExecutionContext = struct {
                 .repeat => |rep| {
                     const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
                     switch (rep.mode) {
-                        .greedy => { self.current_rep_ptr = rep.previous_rep_ptr; },
-                        .lazy => { self.current_rep_ptr = rep.previous_rep_ptr; },
+                        .greedy => {
+                            self.current_rep_ptr = rep.previous_rep_ptr;
+                        },
+                        .lazy => {
+                            self.current_rep_ptr = rep.previous_rep_ptr;
+                        },
                         .possessive => { // Exit repetition if within range; otherwise fail the match.
-                            if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min ) {
+                            if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
                                 self.jmp(rep.escape_jmp);
                                 return true;
                             } else {
@@ -188,7 +192,6 @@ const VMExecutionContext = struct {
                             }
                         },
                     }
-
                 },
                 .choice_point => |choice| {
                     self.str_ptr = choice.backtrack_str_ptr;
@@ -242,14 +245,14 @@ pub fn isWhitespace(string: []const u8, index: usize) bool {
 }
 
 pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: core_types.Match) !core_types.SlicedMatch {
-    var group_arr = try allocator.alloc(?[]const u8, match_item.groups.len);
+    var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
         if (group) |non_null_grp| {
             const string_slice = string[non_null_grp.start..non_null_grp.end];
-            const allocation = try allocator.alloc(u8, string_slice.len);
-            @memcpy(allocation, string_slice);
-            group_arr[i] = allocation;
-
+            const allocation = try allocator.alloc(u8, string_slice.len + 1);
+            @memcpy(allocation[0..string_slice.len], string_slice);
+            allocation[string_slice.len] = 0;
+            group_arr[i] = allocation[0..string_slice.len :0];
         } else {
             group_arr[i] = null;
         }
@@ -257,29 +260,37 @@ pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Patt
     return core_types.SlicedMatch{ .groups = group_arr, .pattern_ptr = pattern };
 }
 
-const ComparisonType = enum {
-    LT,
-    LE,
-    EQ,
-    GT,
-    GE
-};
+const ComparisonType = enum { LT, LE, EQ, GT, GE };
 
 fn repetition_count_cmp(count: usize, max: core_types.RepetitionBoundType, cmp: ComparisonType) bool {
     switch (max) {
         .bounded => |bounded_max| {
             switch (cmp) {
-                .LT => { return count < bounded_max; },
-                .LE => { return count <= bounded_max; },
-                .EQ => { return count == bounded_max; },
-                .GT => { return count > bounded_max; },
-                .GE => { return count >= bounded_max; },
+                .LT => {
+                    return count < bounded_max;
+                },
+                .LE => {
+                    return count <= bounded_max;
+                },
+                .EQ => {
+                    return count == bounded_max;
+                },
+                .GT => {
+                    return count > bounded_max;
+                },
+                .GE => {
+                    return count >= bounded_max;
+                },
             }
         },
         .unbounded => {
-            switch(cmp) {
-                .LT, .LE => { return true; },
-                .GT, .GE, .EQ => { return false; },
+            switch (cmp) {
+                .LT, .LE => {
+                    return true;
+                },
+                .GT, .GE, .EQ => {
+                    return false;
+                },
             }
         },
     }
@@ -434,7 +445,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             .capture_start => |cap| {
                 try main_context.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = main_context.current_group_ptr } });
                 main_context.current_group_ptr = main_context.stack.size - 1; // Top of the stack just pushed to is the group_ptr.
-                (try main_context.currentGroupReference()).* = .{.start = main_context.str_ptr, .end = 0};
+                (try main_context.currentGroupReference()).* = .{ .start = main_context.str_ptr, .end = 0 };
             },
             .capture_end => {
                 (try main_context.currentGroupReference()).*.?.end = main_context.str_ptr;
@@ -554,11 +565,11 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
     var main_context = try VMExecutionContext.init(allocator, test_start_ptr);
     const bytecode = pattern.bytecode;
     defer main_context.deinit(allocator); // Should deinit the stack and the groups array.
-    switch(bytecode[0]) {
+    switch (bytecode[0]) {
         .header_start => {},
         else => {
             return core_types.BytecodeGenError.UnexpectedBytecodeType;
-        }
+        },
     }
     var i: usize = 1;
     while (i < bytecode.len) : (i += 1) {

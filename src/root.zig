@@ -8,107 +8,119 @@ pub const vm = @import("vm.zig");
 
 pub const Pattern = core_types.Pattern;
 
-pub const Match = vm.SlicedMatch;
+pub const Match = core_types.SlicedMatch;
 
-pub const ASTPrintOptions = core_types.ASTPrintOptions; // re-namespacing print options type for easier interfacing.
+pub const ASTPrintOptions = extern struct {
+    show_match_width: bool = false,
+};
 
-pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!Pattern {
-    const sized_ast = try parser.compile(allocator, str_to_parse);
+pub fn compile(allocator: anytype, str_to_parse: []const u8) !Pattern {
+    var sized_ast = try parser.compile(allocator, str_to_parse);
+    errdefer sized_ast.ast.deinit(allocator);
+    var name_map = try codegen.mapNames(allocator, sized_ast.ast);
+    errdefer {
+        name_map.id_to_name_map.deinit();
+        name_map.name_to_id_map.deinit();
+    }
+    const bytecode = try codegen.emit(allocator, sized_ast.ast, sized_ast.group_count);
+    // No need to defer at end; failure means it was never allocated.
     return Pattern{
         .ast = sized_ast.ast,
-        .map = try codegen.mapNames(allocator, sized_ast.ast),
-        .bytecode = try codegen.emit(allocator, sized_ast.ast, sized_ast.group_count),
+        .map = name_map,
+        .bytecode = bytecode,
+        .allocator = &allocator,
     };
 }
 
-pub fn printAST(out_interface: anytype, ast: core_types.AST, options: core_types.ASTPrintOptions) !void {
-    try printASTRecursive(out_interface, ast, options, 0);
+pub fn printAST(out_interface: *std.Io.Writer, ast: core_types.AST, options: ASTPrintOptions) callconv(.c) void {
+    printASTRecursive(out_interface, ast, options, 0) catch {};
 }
-pub fn printBytecode(allocator: anytype, out_interface: anytype, bytecode: []core_types.Instruction) !void {
+
+pub fn printBytecode(out_interface: *std.Io.Writer, bytecode: []core_types.Instruction) void {
     for (0..bytecode.len) |i| {
-        try out_interface.print("{d}:\t", .{i});
+        out_interface.print("{d}:\t", .{i}) catch {};
         switch (bytecode[i]) {
             .header_start => {
-                try out_interface.print("HEADER_START\n", .{});
+                out_interface.print("HEADER_START\n", .{}) catch {};
             },
             .header_end => {
-                try out_interface.print("HEADER_END\n", .{});
+                out_interface.print("HEADER_END\n", .{}) catch {};
             },
             .allocate_groups => |alloc| {
-                try out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size});
+                out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size}) catch {};
             },
             .split => |spl| {
-                try out_interface.print("SPLIT({d}, {d})\n", .{ spl.left, spl.right });
+                out_interface.print("SPLIT({d}, {d})\n", .{ spl.left, spl.right }) catch {};
             },
             .jmp => |jmp| {
-                try out_interface.print("JMP({d})\n", .{jmp});
+                out_interface.print("JMP({d})\n", .{jmp}) catch {};
             },
             .repeat_start => |rep| {
                 switch (rep.max) {
                     .bounded => {
-                        try out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) });
+                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) }) catch {};
                     },
                     .unbounded => {
-                        try out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) });
+                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) }) catch {};
                     },
                 }
             },
             .repeat_end => |rep_end| {
-                try out_interface.print("REP_END(jmp={d})\n", .{rep_end});
+                out_interface.print("REP_END(jmp={d})\n", .{rep_end}) catch {};
             },
             .class => |class_binary| {
-                try out_interface.print("CLASS(", .{});
-                try core_util.print_binary(allocator, out_interface, class_binary, .{ .show_leading_zeroes = false });
-                try out_interface.print(")\n", .{});
+                out_interface.print("CLASS(", .{}) catch {};
+                core_util.print_binary(out_interface, class_binary, .{ .show_leading_zeroes = false });
+                out_interface.print(")\n", .{}) catch {};
             },
             .end_match => {
-                try out_interface.print("MATCH\n", .{});
+                out_interface.print("MATCH\n", .{}) catch {};
             },
             .literal => |lit| {
-                try printLiteralInstruction(out_interface, lit);
+                printLiteralInstruction(out_interface, lit) catch {};
             },
             .capture_start => |cap| {
-                try out_interface.print("CAP_START(id={d})\n", .{cap});
+                out_interface.print("CAP_START(id={d})\n", .{cap}) catch {};
             },
             .capture_end => |cap| {
-                try out_interface.print("CAP_END(id={d})\n", .{cap});
+                out_interface.print("CAP_END(id={d})\n", .{cap}) catch {};
             },
             .atomic_start => {
-                try out_interface.print("ATOMIC_START\n", .{});
+                out_interface.print("ATOMIC_START\n", .{}) catch {};
             },
             .atomic_end => {
-                try out_interface.print("ATOMIC_END\n", .{});
+                out_interface.print("ATOMIC_END\n", .{}) catch {};
             },
             .lookahead_start => {
-                try out_interface.print("LOOKAHEAD_START\n", .{});
+                out_interface.print("LOOKAHEAD_START\n", .{}) catch {};
             },
             .lookahead_end => {
-                try out_interface.print("LOOKAHEAD_END\n", .{});
+                out_interface.print("LOOKAHEAD_END\n", .{}) catch {};
             },
             .lookbehind_start => |len| {
-                try out_interface.print("LOOKBEHIND_START(len={d})\n", .{len});
+                out_interface.print("LOOKBEHIND_START(len={d})\n", .{len}) catch {};
             },
             .lookbehind_end => {
-                try out_interface.print("LOOKBEHIND_END\n", .{});
+                out_interface.print("LOOKBEHIND_END\n", .{}) catch {};
             },
             .neg_lookahead_start => |jmp| {
-                try out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp});
+                out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp}) catch {};
             },
             .neg_lookahead_end => {
-                try out_interface.print("NEG_LOOKAHEAD_END\n", .{});
+                out_interface.print("NEG_LOOKAHEAD_END\n", .{}) catch {};
             },
             .neg_lookbehind_start => |neg_lookbehind| {
-                try out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{neg_lookbehind.len, neg_lookbehind.jmp});
+                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp }) catch {};
             },
             .neg_lookbehind_end => {
-                try out_interface.print("NEG_LOOKBEHIND_END\n", .{});
+                out_interface.print("NEG_LOOKBEHIND_END\n", .{}) catch {};
             },
         }
     }
 }
 
 // Internals.
-fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, options: core_types.ASTPrintOptions, recursion_level: usize) !void {
+fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, options: ASTPrintOptions, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }

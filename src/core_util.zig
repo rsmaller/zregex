@@ -1,38 +1,34 @@
 const std = @import("std");
 const type_reflection = @import("type_reflection.zig");
 
-pub fn print_binary(allocator: anytype, out_interface: anytype, binval: anytype, options: struct{show_leading_zeroes: bool = false}) !void { // Accepts an integer and prints out its binary with the respective width.
-    const T =   @TypeOf(binval);
+pub fn print_binary(out_interface: anytype, binval: anytype, options: struct { show_leading_zeroes: bool = false }) void { // Accepts an integer and prints out its binary with the respective width.
+    const T = @TypeOf(binval);
     const info = @typeInfo(T);
-    switch(info) {
+    const bitlength = @sizeOf(T) * 8;
+    var digit_arr: [bitlength]u1 = [1]u1{0} ** bitlength;
+    switch (info) {
         .int => {
-            var items = try std.ArrayList(u1).initCapacity(allocator, 1);
+            var digit_arr_index: usize = @as(usize, bitlength) - 1;
             var next: T = binval;
-            while (next != 0) {
-                try items.append(allocator, @as(u1, @truncate(next & 1)));
+            while (digit_arr_index > 0 and next > 0) {
+                digit_arr[digit_arr_index] = @as(u1, @truncate(next & 1));
+                digit_arr_index -= 1;
                 next >>= 1;
             }
-            const datasize = @sizeOf(T) * 8;
+            digit_arr[0] = @as(u1, @truncate(next & 1));
+            const filled_data: usize = bitlength - digit_arr_index;
             if (options.show_leading_zeroes) {
-                const leading_zeroes = datasize - items.items.len;
-                for (0..leading_zeroes) |_| {
-                    try out_interface.print("0", .{});
+                for (0..digit_arr.len) |i| {
+                    out_interface.print("{d}", .{digit_arr[i]}) catch {};
                 }
-            }
-            if (items.items.len > 1) {
-                var x = items.items.len-1;
-                while (x > 0) {
-                    try out_interface.print("{d}", .{items.items[x]});
-                    x -= 1;
-                }
-                try out_interface.print("{d}", .{items.items[0]});
             } else {
-                try out_interface.print("{d}", .{items.items[0]});
+                for (digit_arr.len - filled_data + 1..digit_arr.len) |i| {
+                    out_interface.print("{d}", .{digit_arr[i]}) catch {};
+                }
             }
-            items.deinit(allocator);
         },
         else => {
             @compileError("Invalid type " ++ @typeName(T) ++ " passed to print_binary()");
-        }
+        },
     }
 }

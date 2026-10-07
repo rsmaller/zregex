@@ -15,7 +15,7 @@ pub fn main(init: std.process.Init) !void {
     }
     std.debug.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});
     std.debug.print("Size of fixed alloc buffer: {d}\n", .{fixed_alloc_buffer.len});
-    
+
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     defer init.arena.allocator().free(args);
     if (args.len < 3) {
@@ -28,13 +28,13 @@ pub fn main(init: std.process.Init) !void {
     const string_to_match = args[1]; //"john.doe@gmail.com";
     const pattern = args[2];
     var compiled_pattern = try zregex.compile(allocator, pattern);
-    defer compiled_pattern.deinit(allocator);
-    try stdout.print("String: {s}, Pattern: {s}\n", .{string_to_match, pattern});
+    defer compiled_pattern.deinit();
+    try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern });
     if (compiled_pattern.ast) |ast| {
         try stdout.print("AST:\n", .{});
-        try zregex.printAST(stdout, ast, .{ .show_match_width = true });
+        zregex.printAST(stdout, ast, .{ .show_match_width = true });
         try stdout.print("\nBytecode:\n", .{});
-        try zregex.printBytecode(allocator, stdout, compiled_pattern.bytecode);
+        zregex.printBytecode(stdout, compiled_pattern.bytecode);
     }
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});
     const my_match = try compiled_pattern.match(allocator, string_to_match);
@@ -51,9 +51,9 @@ pub fn main(init: std.process.Init) !void {
             }
             try stdout.print(": ", .{});
             if (item) |non_null_item| {
-                try stdout.print("\"{s}\"\n", .{ non_null_item });
+                try stdout.print("\"{s}\"\n", .{non_null_item});
             } else {
-                try stdout.print("<NULL>\n", .{ });
+                try stdout.print("<NULL>\n", .{});
             }
         }
     }

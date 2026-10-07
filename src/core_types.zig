@@ -7,16 +7,17 @@ pub const Pattern = struct {
     ast: ?AST,
     map: NameIDMap,
     bytecode: []Instruction,
+    allocator: *const std.mem.Allocator,
     pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !?SlicedMatch {
         return try vm.match(allocator, self, string);
     }
-    pub fn deinit(pattern: *@This(), allocator: anytype) void {
-        if (pattern.ast) |ast| {
-            destroyAST(allocator, ast);
+    pub fn deinit(self: *@This()) void {
+        if (self.ast) |*ast| {
+            ast.*.deinit(self.allocator);
         }
-        allocator.free(pattern.bytecode);
-        pattern.map.name_to_id_map.deinit();
-        pattern.map.id_to_name_map.deinit();
+        self.allocator.free(self.bytecode);
+        self.map.name_to_id_map.deinit();
+        self.map.id_to_name_map.deinit();
     }
     pub fn getIdByName(self: *const @This(), name: []const u8) ?usize {
         return self.map.name_to_id_map.get(name);
@@ -27,7 +28,7 @@ pub const Pattern = struct {
 };
 
 pub const SlicedMatch = struct {
-    groups: []?[]const u8,
+    groups: []?[:0]const u8,
     pattern_ptr: *const Pattern,
     pub fn deinit(self: *const @This(), allocator: anytype) void {
         for (self.groups) |grp| {
@@ -114,15 +115,11 @@ pub const Instruction = union(enum) {
     class: u256, // binary-optimized for every 8-bit character.
 };
 
-pub const AST = *const ASTNode;
+pub const AST = *ASTNode;
 
 pub const GroupSizedAST = struct {
     ast: AST,
     group_count: usize,
-};
-
-pub const ASTPrintOptions = struct {
-    show_match_width: bool = false,
 };
 
 pub const RepeaterType = enum {
@@ -186,17 +183,14 @@ pub const GroupNode = struct {
     expr: *ASTNode,
     id: ?usize,
     name: ?[]const u8, // Not nested in GroupNode for simplicity.
-    type: union(enum) {
-        capturing: union(enum) {
-            generic,
-        },
-        non_capturing: union(enum) {
-            generic: void,
-            atomic: void,
-            lookahead: void,
-            lookbehind: usize,
-        }
-    },
+    type: union(enum) { capturing: union(enum) {
+        generic,
+    }, non_capturing: union(enum) {
+        generic: void,
+        atomic: void,
+        lookahead: void,
+        lookbehind: usize,
+    } },
     negated: bool,
     pub fn equals(self: *const GroupNode, other: GroupNode) bool {
         if (@intFromEnum(self.type) != @intFromEnum(other.type)) {
@@ -371,39 +365,37 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
         }
         return true;
     }
-};
-
-pub fn destroyAST(allocator: anytype, pattern: AST) void {
-    switch (pattern.*) {
-        .leaf_atom => {},
-        .alternation => |alt| {
-            for (alt.parts) |item| {
-                destroyAST(allocator, item);
-            }
-            allocator.free(alt.parts);
-        },
-        .concatenation => |concat| {
-            for (concat.parts) |item| {
-                destroyAST(allocator, item);
-            }
-            allocator.free(concat.parts);
-        },
-        .group => |grp| {
-            destroyAST(allocator, grp.expr);
-        },
-        .repetition => |rep| {
-            destroyAST(allocator, rep.child);
-        },
-        .class => |class_item| {
-            allocator.free(class_item.items);
-        },
-        .epsilon, .failed_parse => {
-            return;
-        }, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
+    pub fn deinit(self: *@This(), allocator: anytype) void {
+        switch (self.*) {
+            .leaf_atom => {},
+            .alternation => |alt| {
+                for (alt.parts) |item| {
+                    item.deinit(allocator);
+                }
+                allocator.free(alt.parts);
+            },
+            .concatenation => |concat| {
+                for (concat.parts) |item| {
+                    item.deinit(allocator);
+                }
+                allocator.free(concat.parts);
+            },
+            .group => |grp| {
+                grp.expr.deinit(allocator);
+            },
+            .repetition => |rep| {
+                rep.child.deinit(allocator);
+            },
+            .class => |class_item| {
+                allocator.free(class_item.items);
+            },
+            .epsilon, .failed_parse => {
+                return;
+            }, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
+        }
+        allocator.destroy(self);
     }
-    allocator.destroy(pattern);
-}
-
+};
 
 pub const ParsingError = error{
     TokenNotFound,
