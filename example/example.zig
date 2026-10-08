@@ -1,3 +1,4 @@
+// An example program using zregex as a native zig module.
 const std = @import("std");
 const zregex = @import("zregex");
 const builtin = @import("builtin");
@@ -30,12 +31,10 @@ pub fn main(init: std.process.Init) !void {
     var compiled_pattern = try zregex.compile(allocator, pattern);
     defer compiled_pattern.deinit();
     try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern });
-    if (compiled_pattern.ast) |ast| {
-        try stdout.print("AST:\n", .{});
-        zregex.printAST(stdout, ast, .{ .show_match_width = true });
-        try stdout.print("\nBytecode:\n", .{});
-        zregex.printBytecode(stdout, compiled_pattern.bytecode);
-    }
+    try stdout.print("AST:\n", .{});
+    zregex.printAST(stdout, compiled_pattern, .{ .show_match_width = true });
+    try stdout.print("\nBytecode:\n", .{});
+    zregex.printBytecode(stdout, compiled_pattern);
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});
     const my_match = try compiled_pattern.match(allocator, string_to_match);
     defer {

@@ -1,28 +1,46 @@
+// Frontend for zregex dynamic lib containing CABI-compatible functions which call the zregex main library functions.
+// The zregex module can itself be imported into a zig program as well.
 const std = @import("std");
 const zregex = @import("zregex");
 
+var io_ref: ?*std.Io.Writer = null;
 var gpa = std.heap.DebugAllocator(.{}){};
 const allocator = gpa.allocator();
 
-const BytecodeHandle = *opaque {};
+const BytecodeHandle = *opaque {}; // All translate to void * values in C header.
 const PatternHandle = *opaque {};
 
-pub const Match = extern struct {
+pub const Match = extern struct { // CABI-compatible reconstruction of zregex match struct with opaque pattern handle and char **groups.
     groups: [*]?[*:0]const u8,
     pattern_ptr: PatternHandle,
     group_count: usize,
 };
 
-// export const print_ast = zregex.printAST;
+pub export fn zregex_init_zig(io_handle: *std.Io.Writer) void { // Hooks into IO for zig files; C IO handle to be determined.
+    io_ref = io_handle;
+}
 
-// pub export fn print_bytecode(out_interface: *std.Io.Writer, bytecode: BytecodeHandle) callconv(.c) void {
-//     const internal: *[]zregex.core_types.Instruction = @ptrCast(@alignCast(bytecode));
-//     zregex.printBytecode(out_interface, internal.*);
-// }
+pub export fn zregex_print_bytecode(pattern_handle: PatternHandle) callconv(.c) void {
+    const internal: *zregex.Pattern = @ptrCast(@alignCast(pattern_handle));
+    if (io_ref) |io| {
+        zregex.printBytecode(io, internal.*);
+    } else {
+        @panic("Null I/O reference cannot be accessed for printing. Please ensure library has been properly initialized!");
+    }
+}
 
-pub export fn zregex_compile(str_to_parse: [*:0]u8) callconv(.c) ?PatternHandle {
-    const string: []u8 = std.mem.span(str_to_parse);
-    const pattern: zregex.Pattern = zregex.compile(allocator, string) catch {
+pub export fn zregex_print_ast(pattern_handle: PatternHandle, options: zregex.ASTPrintOptions) callconv(.c) void {
+    const internal: *zregex.Pattern = @ptrCast(@alignCast(pattern_handle));
+    if (io_ref) |io| {
+        zregex.printAST(io, internal.*, options);
+    } else {
+        @panic("Null I/O reference cannot be accessed for printing. Please ensure library has been properly initialized!");
+    }
+}
+
+pub export fn zregex_compile(str: [*:0]u8) callconv(.c) ?PatternHandle {
+    const string: []u8 = std.mem.span(str);
+    var pattern: zregex.Pattern = zregex.compile(allocator, string) catch {
         return null;
     };
     const ret = allocator.create(zregex.Pattern) catch {

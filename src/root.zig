@@ -28,15 +28,21 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) !Pattern {
         .ast = sized_ast.ast,
         .map = name_map,
         .bytecode = bytecode,
-        .allocator = &allocator,
+        .allocator = allocator,
     };
 }
 
-pub fn printAST(out_interface: *std.Io.Writer, ast: core_types.AST, options: ASTPrintOptions) callconv(.c) void {
-    printASTRecursive(out_interface, ast, options, 0) catch {};
+pub fn printAST(out_interface: *std.Io.Writer, pattern: core_types.Pattern, options: ASTPrintOptions) void {
+    if (pattern.ast) |ast| {
+        printASTRecursive(out_interface, ast, options, 0) catch {};
+    } else {
+        out_interface.print("<Null AST>\n", .{}) catch {};
+    }
+
 }
 
-pub fn printBytecode(out_interface: *std.Io.Writer, bytecode: []core_types.Instruction) void {
+pub fn printBytecode(out_interface: *std.Io.Writer, pattern: core_types.Pattern) void {
+    const bytecode: []core_types.Instruction = pattern.bytecode;
     for (0..bytecode.len) |i| {
         out_interface.print("{d}:\t", .{i}) catch {};
         switch (bytecode[i]) {
@@ -117,6 +123,7 @@ pub fn printBytecode(out_interface: *std.Io.Writer, bytecode: []core_types.Instr
             },
         }
     }
+    out_interface.flush() catch {};
 }
 
 // Internals.

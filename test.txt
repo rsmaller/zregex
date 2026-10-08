@@ -1,0 +1,189 @@
+String: abc, Pattern: \w+
+AST:
+[Requisite match width is 1 - inf] -> REPETITION(min = 1, max = inf, type = greedy)
+	[Requisite match width is 1 - 1] -> LITERAL(item = word, negated = false)
+
+Bytecode:
+0:	HEADER_START
+1:	ALLOC_GROUPS(1)
+2:	HEADER_END
+3:	CAP_START(id=0)
+4:	REP_START(min=1, max=inf, esc=7, greedy)
+5:	LITERAL(item = word, negated = false)
+6:	REP_END(jmp=5)
+7:	CAP_END(id=0)
+8:	MATCH
+
+Match against string abc:
+Group 0 : "abc"
+Segmentation fault at address 0x43
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:160: 0x7ff7f1e86a1b in rawFree (example_zcu.obj)
+    return a.vtable.free(a.ptr, memory, alignment, ret_addr);
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\mem\Allocator.zig:182:17: 0x7ff7f1e86a1b in destroy__anon_61714 (example_zcu.obj)
+    self.rawFree(
+                ^
+C:\Users\ryjob\Documents\GitHub\zregex\src\core_types.zig:396:26: 0x7ff7f1e86691 in deinit__anon_61650 (example_zcu.obj)
+        std.debug.print("Freeing {*}\n", .{self});
+                         ^
+C:\Users\ryjob\Documents\GitHub\zregex\src\core_types.zig:387:33: 0x7ff7f1e867a5 in deinit__anon_61650 (example_zcu.obj)
+                rep.child.deinit(allocator);
+                                ^
+C:\Users\ryjob\Documents\GitHub\zregex\src\core_types.zig:16:23: 0x7ff7f1e86270 in deinit (example_zcu.obj)
+            ast.deinit(self.allocator);
+                      ^
+C:\Users\ryjob\Documents\GitHub\zregex\example\example.zig:31:34: 0x7ff7f1e78ad7 in main (example_zcu.obj)
+    defer compiled_pattern.deinit();
+                                 ^
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\start.zig:737: 0x7ff7f1e78f5f in callMain (example_zcu.obj)
+    return wrapMain(root.main(.{
+
+C:\Program Files\zig-x86_64-windows-0.16.0\lib\std\start.zig:485:17: 0x7ff7f1e78f5f in WinStartup (example_zcu.obj)
+        callMain(std.os.windows.peb().ProcessParameters.CommandLine.slice(), .global),
+                ^
+???:?:?: 0x7ffa6f22cd86 in ??? (KERNEL32.DLL)
+???:?:?: 0x7ffa7074caeb in ??? (ntdll.dll)

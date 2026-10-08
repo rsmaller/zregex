@@ -7,13 +7,13 @@ pub const Pattern = struct {
     ast: ?AST,
     map: NameIDMap,
     bytecode: []Instruction,
-    allocator: *const std.mem.Allocator,
+    allocator: std.mem.Allocator,
     pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !?SlicedMatch {
         return try vm.match(allocator, self, string);
     }
     pub fn deinit(self: *@This()) void {
-        if (self.ast) |*ast| {
-            ast.*.deinit(self.allocator);
+        if (self.ast) |ast| {
+            ast.deinit(self.allocator);
         }
         self.allocator.free(self.bytecode);
         self.map.name_to_id_map.deinit();
