@@ -123,7 +123,6 @@ pub fn printBytecode(out_interface: *std.Io.Writer, pattern: core_types.Pattern)
             },
         }
     }
-    out_interface.flush() catch {};
 }
 
 // Internals.
