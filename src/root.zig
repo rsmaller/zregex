@@ -34,9 +34,9 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) !Pattern {
 
 pub fn printAST(out_interface: *std.Io.Writer, pattern: core_types.Pattern, options: ASTPrintOptions) void {
     if (pattern.ast) |ast| {
-        printASTRecursive(out_interface, ast, options, 0) catch {};
+        printASTRecursive(out_interface, ast, options, 0) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
     } else {
-        out_interface.print("<Null AST>\n", .{}) catch {};
+        out_interface.print("<Null AST>\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
     }
 
 }
@@ -44,82 +44,82 @@ pub fn printAST(out_interface: *std.Io.Writer, pattern: core_types.Pattern, opti
 pub fn printBytecode(out_interface: *std.Io.Writer, pattern: core_types.Pattern) void {
     const bytecode: []core_types.Instruction = pattern.bytecode;
     for (0..bytecode.len) |i| {
-        out_interface.print("{d}:\t", .{i}) catch {};
+        out_interface.print("{d}:\t", .{i}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
         switch (bytecode[i]) {
             .header_start => {
-                out_interface.print("HEADER_START\n", .{}) catch {};
+                out_interface.print("HEADER_START\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .header_end => {
-                out_interface.print("HEADER_END\n", .{}) catch {};
+                out_interface.print("HEADER_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .allocate_groups => |alloc| {
-                out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size}) catch {};
+                out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .split => |spl| {
-                out_interface.print("SPLIT({d}, {d})\n", .{ spl.left, spl.right }) catch {};
+                out_interface.print("SPLIT({d}, {d})\n", .{ spl.left, spl.right }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .jmp => |jmp| {
-                out_interface.print("JMP({d})\n", .{jmp}) catch {};
+                out_interface.print("JMP({d})\n", .{jmp}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .repeat_start => |rep| {
                 switch (rep.max) {
                     .bounded => {
-                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) }) catch {};
+                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
                     },
                     .unbounded => {
-                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) }) catch {};
+                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
                     },
                 }
             },
             .repeat_end => |rep_end| {
-                out_interface.print("REP_END(jmp={d})\n", .{rep_end}) catch {};
+                out_interface.print("REP_END(jmp={d})\n", .{rep_end}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .class => |class_binary| {
-                out_interface.print("CLASS(", .{}) catch {};
+                out_interface.print("CLASS(", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
                 core_util.print_binary(out_interface, class_binary, .{ .show_leading_zeroes = false });
-                out_interface.print(")\n", .{}) catch {};
+                out_interface.print(")\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .end_match => {
-                out_interface.print("MATCH\n", .{}) catch {};
+                out_interface.print("MATCH\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .literal => |lit| {
-                printLiteralInstruction(out_interface, lit) catch {};
+                printLiteralInstruction(out_interface, lit) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .capture_start => |cap| {
-                out_interface.print("CAP_START(id={d})\n", .{cap}) catch {};
+                out_interface.print("CAP_START(id={d})\n", .{cap}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .capture_end => |cap| {
-                out_interface.print("CAP_END(id={d})\n", .{cap}) catch {};
+                out_interface.print("CAP_END(id={d})\n", .{cap}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .atomic_start => {
-                out_interface.print("ATOMIC_START\n", .{}) catch {};
+                out_interface.print("ATOMIC_START\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .atomic_end => {
-                out_interface.print("ATOMIC_END\n", .{}) catch {};
+                out_interface.print("ATOMIC_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .lookahead_start => {
-                out_interface.print("LOOKAHEAD_START\n", .{}) catch {};
+                out_interface.print("LOOKAHEAD_START\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .lookahead_end => {
-                out_interface.print("LOOKAHEAD_END\n", .{}) catch {};
+                out_interface.print("LOOKAHEAD_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .lookbehind_start => |len| {
-                out_interface.print("LOOKBEHIND_START(len={d})\n", .{len}) catch {};
+                out_interface.print("LOOKBEHIND_START(len={d})\n", .{len}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .lookbehind_end => {
-                out_interface.print("LOOKBEHIND_END\n", .{}) catch {};
+                out_interface.print("LOOKBEHIND_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .neg_lookahead_start => |jmp| {
-                out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp}) catch {};
+                out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .neg_lookahead_end => {
-                out_interface.print("NEG_LOOKAHEAD_END\n", .{}) catch {};
+                out_interface.print("NEG_LOOKAHEAD_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .neg_lookbehind_start => |neg_lookbehind| {
-                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp }) catch {};
+                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
             .neg_lookbehind_end => {
-                out_interface.print("NEG_LOOKBEHIND_END\n", .{}) catch {};
+                out_interface.print("NEG_LOOKBEHIND_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
         }
     }
