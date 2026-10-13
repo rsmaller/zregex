@@ -28,9 +28,10 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_writer.interface;
     const string_to_match = args[1]; //"john.doe@gmail.com";
     const pattern = args[2];
+    try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern }); // So string and pattern print before errors.
+    try stdout.flush();
     var compiled_pattern = try zregex.compile(allocator, pattern);
     defer compiled_pattern.deinit();
-    try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern });
     try stdout.print("AST:\n", .{});
     zregex.printAST(stdout, compiled_pattern, .{ .show_match_width = true });
     try stdout.print("\nBytecode:\n", .{});

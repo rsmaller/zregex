@@ -22,9 +22,11 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_writer.interface;
     cabi.zregex_init_zig(stdout);
     const string_to_match = args[1]; //"john.doe@gmail.com";
-    const compiled_pattern = cabi.zregex_compile(args[2]);
+    const pattern = args[2];
+    try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern }); // So string and pattern print before errors.
+    try stdout.flush();
+    const compiled_pattern = cabi.zregex_compile(pattern);
     defer cabi.zregex_destroy_pattern(compiled_pattern);
-    try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, args[2] });
     try stdout.print("AST:\n", .{});
     cabi.zregex_print_ast(compiled_pattern, .{.show_match_width = true });
     try stdout.print("\nBytecode:\n", .{});

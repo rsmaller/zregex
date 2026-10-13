@@ -250,6 +250,7 @@ pub fn trimAST(ast: *core_types.ASTNode, allocator: anytype) !void {
 
 fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
     var result = try allocator.create(core_types.ASTNode);
+    errdefer result.deinit(allocator);
     result.* = .failed_parse;
     var result_list = try std.ArrayList(*core_types.ASTNode).initCapacity(allocator, 1);
     defer {
@@ -259,7 +260,6 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
         for (result_list.items) |item| {
             item.deinit(allocator);
         }
-        result.deinit(allocator);
     }
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString; // Error out after deferring.
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
@@ -291,6 +291,7 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
 fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
     var result = try allocator.create(core_types.ASTNode);
+    errdefer result.deinit(allocator);
     result.* = .failed_parse;
     var result_list = try std.ArrayList(*core_types.ASTNode).initCapacity(allocator, 1);
     defer {
@@ -300,7 +301,6 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
         for (result_list.items) |item| {
             item.deinit(allocator);
         }
-        result.deinit(allocator);
     }
     try result_list.append(allocator, try parseFactor(allocator, str_to_parse, i));
     while (i.* < str_to_parse.len and str_to_parse[i.*] != '|' and str_to_parse[i.*] != ')') { // If character pointed to is handled by expr or factor, break.
@@ -320,13 +320,11 @@ fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
     const result = try allocator.create(core_types.ASTNode);
     result.* = .failed_parse;
+    errdefer result.deinit(allocator);
     var result_list = try std.ArrayList(core_types.LeafAtomNode).initCapacity(allocator, 1);
     var negated: bool = false;
     defer {
         result_list.deinit(allocator);
-    }
-    errdefer {
-        result.deinit(allocator);
     }
     if (str_to_parse[i.*] == '^') { // handle ^ negation edge case for first part char class.
         negated = true;

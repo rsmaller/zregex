@@ -367,33 +367,40 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     }
     pub fn deinit(self: *@This(), allocator: anytype) void {
         switch (self.*) {
-            .leaf_atom => {},
+            .leaf_atom => {
+                allocator.destroy(self);
+            },
             .alternation => |alt| {
                 for (alt.parts) |item| {
                     item.deinit(allocator);
                 }
                 allocator.free(alt.parts);
+                allocator.destroy(self);
             },
             .concatenation => |concat| {
                 for (concat.parts) |item| {
                     item.deinit(allocator);
                 }
                 allocator.free(concat.parts);
+                allocator.destroy(self);
             },
             .group => |grp| {
                 grp.expr.deinit(allocator);
+                allocator.destroy(self);
             },
             .repetition => |rep| {
                 rep.child.deinit(allocator);
+                allocator.destroy(self);
             },
             .class => |class_item| {
                 allocator.free(class_item.items);
+                allocator.destroy(self);
             },
-            .epsilon, .failed_parse => {
-                return;
-            }, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
+            .failed_parse => { // Failed parses point to a heap allocation and should be freed.
+                allocator.destroy(self);
+            },
+            .epsilon => {}, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
         }
-        allocator.destroy(self);
     }
 };
 
