@@ -22,7 +22,6 @@ const ZigCIO = union(enum) {
                 allocator.free(buf);
             },
         }
-
     }
 };
 

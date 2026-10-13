@@ -13,6 +13,8 @@ typedef struct Match { // Expose abi.zig's Match struct type.
     bool present;\
 } ZOptional_##T;
 
+#define ZIG_OPTIONAL(T) struct ZOptional_##T
+
 ZIG_NON_PTR_OPTIONAL_DECL(size_t);
 
 typedef struct ASTPrintOptions { // Expose root.zig's ASTPrintOptions struct type.
@@ -36,6 +38,6 @@ void zregex_print_ast(void *pattern_handle, ASTPrintOptions options);
 const char *zregex_name_index(Match *match_handle, const char *name);
 const char *zregex_id_index(Match *match_handle, size_t id);
 
-const ZOptional_size_t zregex_name_to_id(void *pattern_handle, const char *name);
+const ZIG_OPTIONAL(size_t) zregex_name_to_id(void *pattern_handle, const char *name);
 const char *zregex_id_to_name(void *pattern_handle, size_t id);
 void zregex_destroy_name(const char *name);

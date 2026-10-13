@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
         } else {
             printf("Testing match name \"test\": <NULL>\n");
         }
-        const ZOptional_size_t match_id_container = zregex_name_to_id(compiled_pattern, "test");
+        const ZIG_OPTIONAL(size_t) match_id_container = zregex_name_to_id(compiled_pattern, "test");
         if (match_id_container.present) {
             printf("Testing id fetch from name \"test\": %llu\n", match_id_container.value);
         } else {
