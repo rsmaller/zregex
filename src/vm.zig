@@ -2,112 +2,33 @@ const std = @import("std");
 
 const codegen = @import("codegen.zig");
 const core_types = @import("core_types.zig");
+const vm_execution_types = @import("vm_execution_types.zig");
+const repetition_types = @import("repetition_types.zig");
+const instruction_types = @import("instruction_types.zig");
 
-const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction. Unsure if needed.
-    min: usize,
-    max: core_types.RepetitionBoundType,
-    mode: core_types.RepeaterType,
-    previous_rep_ptr: ?usize,
-    current_count: usize,
-    escape_jmp: usize,
-};
+// VM stack re-namespacing.
+const MainStack = vm_execution_types.MainStack;
+const RepeatStackFrame = vm_execution_types.RepeatStackFrame;
+const GroupStackFrame = vm_execution_types.GroupStackFrame;
 
-const ChoicePointStackFrame = struct {
-    backtrack_ip: usize,
-    stack_depth: usize,
-    backtrack_str_ptr: usize,
-    previous_count: usize,
-    previous_rep_ptr: ?usize,
-};
 
-const GroupStackFrame = struct {
-    current_group: usize,
-    previous_group_ptr: ?usize, // the index that points to the previous group frame.
-};
-
-const LookaheadStackFrame = struct {
-    saved_str_ptr: usize,
-    negative: bool,
-    jmp: ?usize,
-};
-
-const StackFrame = union(enum) {
-    choice_point: ChoicePointStackFrame,
-    repeat: RepeatStackFrame,
-    group: GroupStackFrame,
-    lookahead: LookaheadStackFrame,
-    atomic: void, // doesn't have to do anything for now.
-};
-
-fn Stack(T: type) type {
-    return struct {
-        data: []T,
-        size: usize,
-        fn init(allocator: anytype) !Stack(T) {
-            return .{
-                .data = try allocator.alloc(T, 4),
-                .size = 0,
-            };
-        }
-        fn deinit(self: *@This(), allocator: anytype) void {
-            allocator.free(self.data);
-        }
-        fn push(self: *@This(), allocator: anytype, item: T) !void {
-            if (self.size >= self.data.len / 2) { // Dynamic doubling of array.
-                self.data = try allocator.realloc(self.data, self.data.len * 2);
-            }
-            self.data[self.size] = item;
-            self.size += 1;
-        }
-        fn pop(self: *@This(), allocator: anytype) !T {
-            if (self.size == 0) {
-                return core_types.StackError.StackEmptyError;
-            }
-            self.size -= 1;
-            const ret: T = self.data[self.size];
-            if (self.size <= self.data.len / 4) { // Dynamic halving of array.
-                self.data = try allocator.realloc(self.data, self.data.len / 2);
-            }
-            return ret;
-        }
-        fn peek(self: *@This()) !T {
-            if (!self.hasItem()) {
-                return core_types.StackError.StackEmptyError;
-            }
-            return self.data[self.size - 1];
-        }
-        fn fetchPtrAtIndex(self: *@This(), index: usize) !*T {
-            if (index >= self.size) {
-                return core_types.StackError.InvalidStackAccess;
-            }
-            return &self.data[index];
-        }
-        fn fetchAtIndex(self: *@This(), index: usize) !T {
-            return (try self.fetchPtrAtIndex(index)).*;
-        }
-        fn hasItem(self: *@This()) bool {
-            return self.size > 0;
-        }
-    };
-}
-
-const VMMainStack = Stack(StackFrame);
+const ComparisonType = enum { LT, LE, EQ, GT, GE };
 
 const BacktrackOptions = struct {
     allow_across_lookthroughs: bool, // prevents always allowing backtracks to a negative lookthrough frame to succeed if the backtrack is triggered by a negative end instruction.
 };
 
 const VMExecutionContext = struct {
-    stack: VMMainStack,
+    stack: MainStack,
     ip: usize,
     jmp_queued: bool,
     str_ptr: usize,
     current_group_ptr: ?usize, // the index that points to the current group frame.
     current_rep_ptr: ?usize,
-    groups: ?[]?core_types.MatchGroup,
+    groups: ?[]?vm_execution_types.IntermediateMatchGroup,
     pub fn init(allocator: anytype, start_ptr: usize) !VMExecutionContext {
         return .{
-            .stack = try VMMainStack.init(allocator),
+            .stack = try MainStack.init(allocator),
             .ip = 0,
             .jmp_queued = false,
             .current_rep_ptr = null,
@@ -159,7 +80,7 @@ const VMExecutionContext = struct {
     pub fn currentGroupId(self: *@This()) !?usize { // Uses the frame of the current group to grab the current group ID.
         return (try self.currentGroupFrame()).current_group;
     }
-    pub fn currentGroupReference(self: *@This()) !*?core_types.MatchGroup {
+    pub fn currentGroupReference(self: *@This()) !*?vm_execution_types.IntermediateMatchGroup {
         if (self.groups) |grps| {
             return &grps[(try self.currentGroupId()).?];
         } else {
@@ -244,7 +165,7 @@ pub fn isWhitespace(string: []const u8, index: usize) bool {
     return char == ' ' or char == '\n' or char == '\t' or char == '\r';
 }
 
-pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: core_types.Match) !core_types.SlicedMatch {
+pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
         if (group) |non_null_grp| {
@@ -257,12 +178,10 @@ pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Patt
             group_arr[i] = null;
         }
     }
-    return core_types.SlicedMatch{ .groups = group_arr, .pattern_ptr = pattern };
+    return core_types.Match{ .groups = group_arr, .pattern_ptr = pattern };
 }
 
-const ComparisonType = enum { LT, LE, EQ, GT, GE };
-
-fn repetition_count_cmp(count: usize, max: core_types.RepetitionBoundType, cmp: ComparisonType) bool {
+fn repetition_count_cmp(count: usize, max: repetition_types.RepetitionBoundType, cmp: ComparisonType) bool {
     switch (max) {
         .bounded => |bounded_max| {
             switch (cmp) {
@@ -373,8 +292,8 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
     }
     current_frame_ref.current_count += 1;
     const min: usize = current_frame_ref.min;
-    const max: core_types.RepetitionBoundType = current_frame_ref.max;
-    const mode: core_types.RepeaterType = current_frame_ref.mode;
+    const max: repetition_types.RepetitionBoundType = current_frame_ref.max;
+    const mode: repetition_types.RepeaterType = current_frame_ref.mode;
     const current_count = try main_context.currentCount();
     if (current_count < min) {
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
@@ -398,7 +317,7 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
     }
 }
 
-pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []core_types.Instruction, string: []const u8) !?core_types.Match {
+pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []instruction_types.Instruction, string: []const u8) !?vm_execution_types.IntermediateMatch {
     // VM contents.
     while (main_context.ip < bytecode.len) {
         main_context.jmp_queued = false;
@@ -437,7 +356,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .end_match => {
                 if (main_context.groups) |grps| {
-                    return core_types.Match{ .groups = grps };
+                    return vm_execution_types.IntermediateMatch{ .groups = grps };
                 } else {
                     return core_types.VMError.InvalidGroupAllocation;
                 }
@@ -560,7 +479,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
     return null;
 }
 
-pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.SlicedMatch {
+pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.Match {
     var test_start_ptr: usize = 0;
     var main_context = try VMExecutionContext.init(allocator, test_start_ptr);
     const bytecode = pattern.bytecode;
@@ -578,7 +497,7 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
                 if (main_context.groups) |_| {
                     return core_types.VMError.InvalidGroupAllocation;
                 } else {
-                    main_context.groups = try allocator.alloc(?core_types.MatchGroup, alloc_instr.size);
+                    main_context.groups = try allocator.alloc(?vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
                     if (main_context.groups) |grps| {
                         @memset(grps, null);
                     }
@@ -607,3 +526,4 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
     }
     return null;
 }
+

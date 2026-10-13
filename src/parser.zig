@@ -2,10 +2,12 @@ const std = @import("std");
 const zregex = @import("root.zig");
 const type_reflection = @import("type_reflection.zig");
 const core_types = @import("core_types.zig");
+const repetition_types = @import("repetition_types.zig");
+const ast_types = @import("ast_types.zig");
 
-var EPSILON_UNIT: core_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
+var EPSILON_UNIT: ast_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
-pub fn setGroupIDs(ast: *core_types.ASTNode, id: *usize) !void {
+pub fn setGroupIDs(ast: *ast_types.ASTNode, id: *usize) !void {
     switch (ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             switch (grp.type) {
@@ -41,7 +43,7 @@ pub fn setGroupIDs(ast: *core_types.ASTNode, id: *usize) !void {
     }
 }
 
-fn isEqualBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRangeType) bool {
+fn isEqualBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) bool {
     if (@intFromEnum(a.max) != @intFromEnum(b.max)) return false;
     switch (a.max) {
         .bounded => {
@@ -53,7 +55,7 @@ fn isEqualBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRange
     }
 }
 
-fn addBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRangeType) core_types.RepetitionRangeType {
+fn addBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) repetition_types.RepetitionRangeType {
     var result = a;
     result.min += b.min;
     switch (a.max) {
@@ -75,7 +77,7 @@ fn addBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRangeType
     }
 }
 
-fn timesBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRangeType) core_types.RepetitionRangeType {
+fn timesBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) repetition_types.RepetitionRangeType {
     var result = a;
     result.min *= b.min;
     switch (a.max) {
@@ -97,7 +99,7 @@ fn timesBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRangeTy
     }
 }
 
-fn alternationBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionRangeType) core_types.RepetitionRangeType {
+fn alternationBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) repetition_types.RepetitionRangeType {
     var result = a;
     if (a.min > b.min) {
         result.min = b.min;
@@ -123,8 +125,8 @@ fn alternationBound(a: core_types.RepetitionRangeType, b: core_types.RepetitionR
     }
 }
 
-pub fn matchRequirementRange(ast: *const core_types.ASTNode) core_types.RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
-    var result = core_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
+pub fn matchRequirementRange(ast: *const ast_types.ASTNode) repetition_types.RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
+    var result = repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
     switch (ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             return matchRequirementRange(grp.expr);
@@ -146,20 +148,20 @@ pub fn matchRequirementRange(ast: *const core_types.ASTNode) core_types.Repetiti
             return timesBound(rep.reps, matchRequirementRange(rep.child));
         },
         .class => {
-            return core_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
+            return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
         },
         .leaf_atom => |leaf| {
             switch (leaf.leaf_atom) {
                 .word_boundary, .start_anchor, .end_anchor => {
-                    return core_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
+                    return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
                 },
                 else => {
-                    return core_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
+                    return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
                 },
             }
         },
         .epsilon, .failed_parse => {
-            return core_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
+            return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
         },
     }
 }
@@ -180,7 +182,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
                 freed[j] = true;
                 switch (@typeInfo(T)) {
                     .pointer => |ptr| {
-                        if (ptr.child == core_types.ASTNode) {
+                        if (ptr.child == ast_types.ASTNode) {
                             arr[j].deinit(allocator);
                         } else {
                             try allocator.free(arr[j]);
@@ -194,7 +196,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     return try list.toOwnedSlice(allocator);
 }
 
-pub fn trimAST(ast: *core_types.ASTNode, allocator: anytype) !void {
+pub fn trimAST(ast: *ast_types.ASTNode, allocator: anytype) !void {
     switch (ast.*) {
         .group => |grp| {
             switch (grp.type) {
@@ -248,11 +250,11 @@ pub fn trimAST(ast: *core_types.ASTNode, allocator: anytype) !void {
     }
 }
 
-fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
-    var result = try allocator.create(core_types.ASTNode);
+fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
+    var result = try allocator.create(ast_types.ASTNode);
     errdefer result.deinit(allocator);
     result.* = .failed_parse;
-    var result_list = try std.ArrayList(*core_types.ASTNode).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(*ast_types.ASTNode).initCapacity(allocator, 1);
     defer {
         result_list.deinit(allocator);
     }
@@ -288,12 +290,12 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
-fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
+fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
-    var result = try allocator.create(core_types.ASTNode);
+    var result = try allocator.create(ast_types.ASTNode);
     errdefer result.deinit(allocator);
     result.* = .failed_parse;
-    var result_list = try std.ArrayList(*core_types.ASTNode).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(*ast_types.ASTNode).initCapacity(allocator, 1);
     defer {
         result_list.deinit(allocator);
     }
@@ -316,12 +318,12 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
-fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
+fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
-    const result = try allocator.create(core_types.ASTNode);
+    const result = try allocator.create(ast_types.ASTNode);
     result.* = .failed_parse;
     errdefer result.deinit(allocator);
-    var result_list = try std.ArrayList(core_types.LeafAtomNode).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(ast_types.LeafAtomNode).initCapacity(allocator, 1);
     var negated: bool = false;
     defer {
         result_list.deinit(allocator);
@@ -333,7 +335,7 @@ fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             return core_types.ParsingError.EndOfString;
         }
     }
-    var item: core_types.LeafAtomNode = undefined;
+    var item: ast_types.LeafAtomNode = undefined;
     while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
         item = try fetchCharOrRangeInClass(str_to_parse, i); // Parse the first item in the class.
         try result_list.append(allocator, item);
@@ -347,11 +349,11 @@ fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     return result;
 }
 
-fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
+fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
-        const result: *core_types.ASTNode = try allocator.create(core_types.ASTNode);
+        const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
         result.* = .failed_parse;
         errdefer result.deinit(allocator); // Only defers inside this if statement.
         if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
@@ -428,7 +430,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             return result;
         }
     }
-    var atom = try allocator.create(core_types.ASTNode);
+    var atom = try allocator.create(ast_types.ASTNode);
     var metacharacter: bool = undefined;
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
@@ -477,7 +479,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
     };
 }
 
-fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !core_types.LeafAtomNode {
+fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !ast_types.LeafAtomNode {
     switch (metacharacter) {
         true => {
             switch (char_to_set) {
@@ -550,7 +552,7 @@ fn isEscapedMetacharacter(character: u8) bool {
     }
 }
 
-fn assertRepetitionAllowance(atom: *core_types.ASTNode) !void {
+fn assertRepetitionAllowance(atom: *ast_types.ASTNode) !void {
     switch (atom.*) { // Validate that node is allowed to be repeated.
         .group => |grp| {
             switch (grp.type) {
@@ -575,13 +577,13 @@ fn assertRepetitionAllowance(atom: *core_types.ASTNode) !void {
     }
 }
 
-fn checkQuantifiers(atom: *core_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*core_types.ASTNode {
+fn checkQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     var count_min: usize = undefined;
-    var count_max: core_types.RepetitionBoundType = undefined;
+    var count_max: repetition_types.RepetitionBoundType = undefined;
     if (i.* >= str_to_parse.len) {
         return core_types.ParsingError.EndOfString;
     }
-    var repetition_container: core_types.RepetitionRangeType = undefined;
+    var repetition_container: repetition_types.RepetitionRangeType = undefined;
     switch (str_to_parse[i.*]) {
         '*' => {
             try assertRepetitionAllowance(atom);
@@ -636,7 +638,7 @@ fn checkQuantifiers(atom: *core_types.ASTNode, allocator: anytype, str_to_parse:
             return atom;
         },
     }
-    var rep_type: core_types.RepeaterType = .greedy;
+    var rep_type: repetition_types.RepeaterType = .greedy;
     if (i.* < str_to_parse.len and str_to_parse[i.*] == '+') {
         rep_type = .possessive;
         i.* += 1; // Consume the possessive +.
@@ -644,12 +646,12 @@ fn checkQuantifiers(atom: *core_types.ASTNode, allocator: anytype, str_to_parse:
         rep_type = .lazy;
         i.* += 1; // Consume the lazy ?.
     }
-    const atom_parent = try allocator.create(core_types.ASTNode); // Construct repetition node and wrap atom in it.
+    const atom_parent = try allocator.create(ast_types.ASTNode); // Construct repetition node and wrap atom in it.
     atom_parent.* = .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } };
     return atom_parent;
 }
 
-fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!core_types.LeafAtomNode { // For use in character class compilation to tokenize with '-' syntax awareness.
+fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!ast_types.LeafAtomNode { // For use in character class compilation to tokenize with '-' syntax awareness.
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') {
         i.* += 1; // Consume backslash.
@@ -763,7 +765,7 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!core_ty
     return .{ .leaf_atom = .{ .generic = char_to_set }, .inverted = false };
 }
 
-fn printLeafAtom(out_interface: anytype, leaf: core_types.LeafAtomNode) !void {
+fn printLeafAtom(out_interface: anytype, leaf: ast_types.LeafAtomNode) !void {
     switch (leaf.leaf_atom) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;
@@ -819,7 +821,7 @@ fn printLeafAtom(out_interface: anytype, leaf: core_types.LeafAtomNode) !void {
     }
 }
 
-pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!core_types.GroupSizedAST {
+pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!ast_types.GroupSizedAST {
     var i: usize = 0;
     var j: usize = 1; // ID 0 is reserved for whole match.
     var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;

@@ -1,52 +1,16 @@
 const std = @import("std");
 const core_types = @import("core_types.zig");
 const core_util = @import("core_util.zig");
+const ast_types = @import("ast_types.zig");
+const instruction_types = @import("instruction_types.zig");
+const name_map = @import("name_map.zig");
 
-pub fn mapNames(allocator: anytype, ast: *const core_types.ASTNode) !core_types.NameIDMap {
-    var name_to_id_map = std.StringHashMap(usize).init(allocator);
-    var id_to_name_map = std.AutoHashMap(usize, []const u8).init(allocator);
-    try mapNamesRecursive(allocator, &name_to_id_map, &id_to_name_map, ast);
-    return .{ .name_to_id_map = name_to_id_map, .id_to_name_map = id_to_name_map };
-}
-
-pub fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usize), id_to_name_map: *std.AutoHashMap(usize, []const u8), ast: *const core_types.ASTNode) !void {
-    switch(ast.*) {
-        .leaf_atom => {},
-        .concatenation => |concat| {
-            for (concat.parts) |part| {
-                try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, part);
-            }
-        },
-        .alternation => |alt| {
-            for (alt.parts) |part| {
-                try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, part);
-            }
-        },
-        .group => |grp| {
-            if (grp.name) |name| {
-                if (grp.id) |id| {
-                    try name_to_id_map.put(name, id);
-                    try id_to_name_map.put(id, name);
-                } else {
-                    return core_types.BytecodeGenError.InvalidGroupID;
-                }
-            }
-            try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, grp.expr);
-        },
-        .repetition => |rep| {
-            try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, rep.child);
-        },
-        .class => {},
-        .epsilon, .failed_parse => {},
-    }
-}
-
-pub fn emit(allocator: anytype, ast: *const core_types.ASTNode, group_count: usize) ![]core_types.Instruction {
+pub fn emit(allocator: anytype, ast: *ast_types.ASTNode, group_count: usize) ![]instruction_types.Instruction {
     var labels: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
     defer labels.deinit(allocator);
     var fixups: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
     defer fixups.deinit(allocator);
-    var instructions: std.ArrayList(core_types.Instruction) = try std.ArrayList(core_types.Instruction).initCapacity(allocator, 8);
+    var instructions: std.ArrayList(instruction_types.Instruction) = try std.ArrayList(instruction_types.Instruction).initCapacity(allocator, 8);
     defer instructions.deinit(allocator);
     var instruction_index: usize = 0;
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .header_start, &instruction_index);
@@ -63,7 +27,7 @@ pub fn emit(allocator: anytype, ast: *const core_types.ASTNode, group_count: usi
 }
 
 // Replaces JMP and SPLIT instruction label values with actual bytecode-pointing values.
-fn propagateFixups(fixups: []usize, labels: []usize, instructions: []core_types.Instruction) !void {
+fn propagateFixups(fixups: []usize, labels: []usize, instructions: []instruction_types.Instruction) !void {
     for (0..fixups.len) |i| {
         const current = fixups[i];
         switch (instructions[current]) {
@@ -83,7 +47,7 @@ fn emitLabel(allocator: anytype, labels: *std.ArrayList(usize), instruction_ptr:
     try labels.append(allocator, instruction_ptr.*);
 }
 
-fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(core_types.Instruction), fixups: *std.ArrayList(usize), permit_fixups: struct { permit_fixups: bool }, data: core_types.Instruction, index_ptr: *usize) !usize {
+fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), permit_fixups: struct { permit_fixups: bool }, data: instruction_types.Instruction, index_ptr: *usize) !usize {
     try instructions.append(allocator, data);
     index_ptr.* += 1;
     if (permit_fixups.permit_fixups) {
@@ -101,8 +65,8 @@ fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(core_types.I
     return index_ptr.* - 1;
 }
 
-fn leafToLiteralInstruction(leaf: core_types.LeafAtomNode) !core_types.LiteralInstruction {
-    var ret: core_types.LiteralInstruction = undefined;
+fn leafToLiteralInstruction(leaf: ast_types.LeafAtomNode) !instruction_types.LiteralInstruction {
+    var ret: instruction_types.LiteralInstruction = undefined;
     ret.inverted = leaf.inverted;
     switch (leaf.leaf_atom) {
         .any => {
@@ -136,7 +100,7 @@ fn leafToLiteralInstruction(leaf: core_types.LeafAtomNode) !core_types.LiteralIn
     return ret;
 }
 
-fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(core_types.Instruction), fixups: *std.ArrayList(usize), ast: *const core_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
+fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), ast: *ast_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
     switch (ast.*) {
         .leaf_atom => |leaf| {
             _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
@@ -144,7 +108,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
         .repetition => |rep| {
             const rep_start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_start = .{ .min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type, .escape_jmp = 0 } }, instruction_ptr);
             try emitRecursive(allocator, labels, instructions, fixups, rep.child, instruction_ptr, recursion_level + 1);
-            const rep_end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index + 1 }, instruction_ptr); // Repeat_end must just jump past the repeat_start instruction, to the next one, which may or may not be the repeat_end instruction itself.
+            const rep_end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index + 1 }, instruction_ptr); // *ast_types.ASTNode_end must just jump past the repeat_start instruction, to the next one, which may or may not be the repeat_end instruction itself.
             instructions.items[rep_start_index].repeat_start.escape_jmp = rep_end_index + 1; // for possessive matching frames to escape repetition when backtracking is attempted in range.
             try emitLabel(allocator, labels, instruction_ptr);
         },

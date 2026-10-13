@@ -1,10 +1,14 @@
 const std = @import("std");
-pub const core_types = @import("core_types.zig");
-pub const type_reflection = @import("type_reflection.zig");
-pub const parser = @import("parser.zig");
-pub const codegen = @import("codegen.zig");
-pub const core_util = @import("core_util.zig");
-pub const vm = @import("vm.zig");
+const parser = @import("parser.zig");
+const codegen = @import("codegen.zig");
+const core_util = @import("core_util.zig");
+const vm = @import("vm.zig");
+const instruction_types = @import("instruction_types.zig");
+const ast_types = @import("ast_types.zig");
+const repetition_types = @import("repetition_types.zig");
+const name_map = @import("name_map.zig");
+pub const type_reflection = @import("type_reflection.zig"); // Provided to the end user for declaration checks; they are useful!
+pub const core_types = @import("core_types.zig"); // The only type interface to be exposed to the user.
 
 pub const Pattern = core_types.Pattern;
 
@@ -17,16 +21,16 @@ pub const ASTPrintOptions = extern struct {
 pub fn compile(allocator: anytype, str_to_parse: []const u8) !Pattern {
     var sized_ast = try parser.compile(allocator, str_to_parse);
     errdefer sized_ast.ast.deinit(allocator);
-    var name_map = try codegen.mapNames(allocator, sized_ast.ast);
+    var mapping = try name_map.mapNames(allocator, sized_ast.ast);
     errdefer {
-        name_map.id_to_name_map.deinit();
-        name_map.name_to_id_map.deinit();
+        mapping.id_to_name_map.deinit();
+        mapping.name_to_id_map.deinit();
     }
     const bytecode = try codegen.emit(allocator, sized_ast.ast, sized_ast.group_count);
     // No need to defer at end; failure means it was never allocated.
     return Pattern{
         .ast = sized_ast.ast,
-        .map = name_map,
+        .map = mapping,
         .bytecode = bytecode,
         .allocator = allocator,
     };
@@ -42,7 +46,7 @@ pub fn printAST(out_interface: *std.Io.Writer, pattern: core_types.Pattern, opti
 }
 
 pub fn printBytecode(out_interface: *std.Io.Writer, pattern: core_types.Pattern) void {
-    const bytecode: []core_types.Instruction = pattern.bytecode;
+    const bytecode: []instruction_types.Instruction = pattern.bytecode;
     for (0..bytecode.len) |i| {
         out_interface.print("{d}:\t", .{i}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
         switch (bytecode[i]) {
@@ -126,11 +130,11 @@ pub fn printBytecode(out_interface: *std.Io.Writer, pattern: core_types.Pattern)
 }
 
 // Internals.
-fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, options: ASTPrintOptions, recursion_level: usize) !void {
+fn printASTRecursive(out_interface: anytype, ast: *ast_types.ASTNode, options: ASTPrintOptions, recursion_level: usize) !void {
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
-    const len: core_types.RepetitionRangeType = parser.matchRequirementRange(ast);
+    const len: repetition_types.RepetitionRangeType = parser.matchRequirementRange(ast);
     if (options.show_match_width) {
         switch (len.max) {
             .bounded => {
@@ -199,7 +203,7 @@ fn printASTRecursive(out_interface: anytype, ast: *const core_types.ASTNode, opt
     }
 }
 
-fn printLiteralInstruction(out_interface: anytype, instruction: core_types.LiteralInstruction) !void { // prints leaf of AST or bytecode.
+fn printLiteralInstruction(out_interface: anytype, instruction: instruction_types.LiteralInstruction) !void { // prints leaf of AST or bytecode.
     switch (instruction.data) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;
@@ -224,7 +228,7 @@ fn printLiteralInstruction(out_interface: anytype, instruction: core_types.Liter
     }
 }
 
-fn printLeafAtom(out_interface: anytype, leaf: core_types.LeafAtomNode) !void { // prints leaf of AST or bytecode.
+fn printLeafAtom(out_interface: anytype, leaf: ast_types.LeafAtomNode) !void { // prints leaf of AST or bytecode.
     switch (leaf.leaf_atom) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;

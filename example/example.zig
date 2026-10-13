@@ -44,6 +44,18 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     if (my_match) |match| {
+        const match_str = match.nameIndex("test");
+        if (match_str) |str| {
+            try stdout.print("Testing match name \"test\": \"{s}\"\n", .{str});
+        } else {
+            try stdout.print("Testing match name \"test\": <NULL>\n", .{});
+        }
+        const match_id_container = compiled_pattern.nameToId("test");
+        if (match_id_container) |id| {
+            try stdout.print("Testing id fetch from name \"test\": {d}\n", .{id});
+        } else {
+            try stdout.print("Testing id fetch from name \"test\": NULL\n", .{});
+        }
         for (match.groups, 0..) |item, id| {
             try stdout.print("Group {d}", .{id});
             if (compiled_pattern.idToName(id)) |name| {
