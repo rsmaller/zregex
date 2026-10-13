@@ -249,7 +249,7 @@ pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Patt
     for (match_item.groups, 0..) |group, i| {
         if (group) |non_null_grp| {
             const string_slice = string[non_null_grp.start..non_null_grp.end];
-            const allocation = try allocator.alloc(u8, string_slice.len + 1);
+            const allocation = try allocator.allocSentinel(u8, string_slice.len, 0);
             @memcpy(allocation[0..string_slice.len], string_slice);
             allocation[string_slice.len] = 0;
             group_arr[i] = allocation[0..string_slice.len :0];

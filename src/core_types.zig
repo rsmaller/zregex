@@ -19,10 +19,10 @@ pub const Pattern = struct {
         self.map.name_to_id_map.deinit();
         self.map.id_to_name_map.deinit();
     }
-    pub fn getIdByName(self: *const @This(), name: []const u8) ?usize {
+    pub fn nameToId(self: *const @This(), name: []const u8) ?usize {
         return self.map.name_to_id_map.get(name);
     }
-    pub fn getNameById(self: *const @This(), id: usize) ?[]const u8 {
+    pub fn idToName(self: *const @This(), id: usize) ?[]const u8 {
         return self.map.id_to_name_map.get(id);
     }
 };
@@ -38,13 +38,13 @@ pub const SlicedMatch = struct {
         }
         allocator.free(self.groups);
     }
-    pub fn getMatchFromName(self: *const @This(), name: []const u8) ?[]const u8 {
+    pub fn nameIndex(self: *const @This(), name: []const u8) ?[]const u8 {
         if (self.pattern_ptr.getIdByName(name)) |id| {
             return self.groups[id];
         }
         return null;
     }
-    pub fn getMatchFromId(self: *const @This(), id: usize) ?[]const u8 {
+    pub fn idIndex(self: *const @This(), id: usize) ?[]const u8 {
         return self.groups[id];
     }
 };

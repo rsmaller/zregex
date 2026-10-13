@@ -44,9 +44,9 @@ pub fn main(init: std.process.Init) !void {
     }
     if (my_match) |match| {
         for (match.groups, 0..) |item, id| {
-            try stdout.print("Group {d} ", .{id});
-            if (compiled_pattern.getNameById(id)) |name| {
-                try stdout.print("<{s}>", .{name});
+            try stdout.print("Group {d}", .{id});
+            if (compiled_pattern.idToName(id)) |name| {
+                try stdout.print(" <{s}>", .{name});
             }
             try stdout.print(": ", .{});
             if (item) |non_null_item| {
