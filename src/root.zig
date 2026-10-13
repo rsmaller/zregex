@@ -36,7 +36,7 @@ pub fn compile(allocator: anytype, str_to_parse: []const u8) !Pattern {
     };
 }
 
-pub fn printAST(out_interface: *std.Io.Writer, pattern: core_types.Pattern, options: ASTPrintOptions) void {
+pub fn printAST(out_interface: anytype, pattern: core_types.Pattern, options: ASTPrintOptions) void {
     if (pattern.ast) |ast| {
         printASTRecursive(out_interface, ast, options, 0) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
     } else {
@@ -45,7 +45,7 @@ pub fn printAST(out_interface: *std.Io.Writer, pattern: core_types.Pattern, opti
 
 }
 
-pub fn printBytecode(out_interface: *std.Io.Writer, pattern: core_types.Pattern) void {
+pub fn printBytecode(out_interface: anytype, pattern: core_types.Pattern) void {
     const bytecode: []instruction_types.Instruction = pattern.bytecode;
     for (0..bytecode.len) |i| {
         out_interface.print("{d}:\t", .{i}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };

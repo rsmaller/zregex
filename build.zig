@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/abi.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "zregex", .module = zregex_mod },
             },

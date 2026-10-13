@@ -2,8 +2,31 @@
 // The zregex module can itself be imported into a zig program as well.
 const std = @import("std");
 const zregex = @import("zregex");
+const cstdlib = @cImport(@cInclude("stdio.h"));
 
-var io_ref: ?*std.Io.Writer = null;
+const ZigCIO = union(enum) {
+    zig: struct {
+        io: *std.Io.Writer,
+    },
+    c: struct {
+        stdio: *cstdlib.FILE,
+    },
+    pub fn print(self: *const @This(), comptime fmt: []const u8, args: anytype) !void {
+        switch (self.*) {
+            .zig => |zig_io| {
+                try zig_io.io.print(fmt, args);
+            },
+            .c => |c_io| {
+                const buf = try std.fmt.allocPrint(allocator, fmt, args);
+                _ = cstdlib.fwrite(@ptrCast(buf.ptr), @sizeOf(u8), buf.len, c_io.stdio);
+                allocator.free(buf);
+            },
+        }
+
+    }
+};
+
+var io_ref: ?ZigCIO = null;
 var gpa = std.heap.DebugAllocator(.{}){};
 const allocator = gpa.allocator();
 
@@ -23,8 +46,14 @@ pub const Match = extern struct { // CABI-compatible reconstruction of zregex ma
     group_count: usize,
 };
 
-pub export fn zregex_init_zig(io_handle: *std.Io.Writer) void { // Hooks into IO for zig files; C IO handle to be determined.
-    io_ref = io_handle;
+pub export fn zregex_dummy() callconv(.c) void {}
+
+pub export fn zregex_init_zig(io_handle: *std.Io.Writer) callconv(.c) void { // Hooks into IO for zig files; C IO handle to be determined.
+    io_ref = .{.zig = .{ .io = io_handle } };
+}
+
+pub export fn zregex_init_c(io_handle: *cstdlib.FILE) callconv(.c) void {
+    io_ref = .{.c = .{ .stdio = io_handle }};
 }
 
 pub export fn zregex_print_bytecode(pattern_handle: PatternHandle) callconv(.c) void {
