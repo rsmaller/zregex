@@ -57,17 +57,23 @@ pub fn Stack(T: type) type {
                 .size = 0,
             };
         }
-       pub fn deinit(self: *@This(), allocator: anytype) void {
+        pub fn len(self: *const @This()) usize { // Returns the length of memory the stack contains.
+            return self.data.len;
+        }
+        pub fn elementCount(self: *const @This()) usize { // Returns how many elements are in the stack currently.
+            return self.size;
+        }
+        pub fn deinit(self: *@This(), allocator: anytype) void {
             allocator.free(self.data);
         }
-       pub fn push(self: *@This(), allocator: anytype, item: T) !void {
+        pub fn push(self: *@This(), allocator: anytype, item: T) !void {
             if (self.size >= self.data.len / 2) { // Dynamic doubling of array.
                 self.data = try allocator.realloc(self.data, self.data.len * 2);
             }
             self.data[self.size] = item;
             self.size += 1;
         }
-       pub fn pop(self: *@This(), allocator: anytype) !T {
+        pub fn pop(self: *@This(), allocator: anytype) !T {
             if (self.size == 0) {
                 return core_types.VMError.StackEmptyError;
             }
@@ -78,22 +84,22 @@ pub fn Stack(T: type) type {
             }
             return ret;
         }
-       pub fn peek(self: *@This()) !T {
+        pub fn peek(self: *@This()) !T {
             if (!self.hasItem()) {
                 return core_types.VMError.StackEmptyError;
             }
             return self.data[self.size - 1];
         }
-       pub fn fetchPtrAtIndex(self: *@This(), index: usize) !*T {
+        pub fn fetchPtrAtIndex(self: *@This(), index: usize) !*T {
             if (index >= self.size) {
                 return core_types.VMError.InvalidStackAccess;
             }
             return &self.data[index];
         }
-       pub fn fetchAtIndex(self: *@This(), index: usize) !T {
+        pub fn fetchAtIndex(self: *@This(), index: usize) !T {
             return (try self.fetchPtrAtIndex(index)).*;
         }
-       pub fn hasItem(self: *@This()) bool {
+        pub fn hasItem(self: *@This()) bool {
             return self.size > 0;
         }
     };

@@ -1,7 +1,11 @@
 CC = gcc
 FLAGS = -Wall
 IFLAGS = -I./include
-LFLAGS = -L./zig-out/bin -lzregex
+LFLAGS = -L./c-out/
+OS := $(shell uname)
+ifeq ($(OS), Darwin)
+	LFLAGS += -Wl,-rpath,./c-out
+endif
 
 default: all
 
@@ -11,6 +15,8 @@ zig-lib:
 	zig build
 
 c-example: ./c-example/c-example.c zig-lib
-	mkdir c-out
-	$(CC) ./c-example/c-example.c $(FLAGS) $(IFLAGS) $(LFLAGS) -o c-out/c-example
-	cp ./zig-out/bin/zregex.* c-out/
+	mkdir -p c-out
+	cp ./zig-out/bin/* ./c-out
+	cp ./zig-out/lib/* ./c-out
+	$(CC) ./c-example/c-example.c $(FLAGS) $(IFLAGS) $(LFLAGS) -lzregex -o c-out/c-example
+	

@@ -11,7 +11,6 @@ const MainStack = vm_execution_types.MainStack;
 const RepeatStackFrame = vm_execution_types.RepeatStackFrame;
 const GroupStackFrame = vm_execution_types.GroupStackFrame;
 
-
 const ComparisonType = enum { LT, LE, EQ, GT, GE };
 
 const BacktrackOptions = struct {
@@ -303,11 +302,11 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
     } else {
         switch (mode) {
             .greedy => {
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = main_context.ip + 1, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.len(), .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 main_context.jmp(jump_index);
             },
             .lazy => {
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.len(), .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 main_context.jmp(main_context.ip + 1);
             },
             .possessive => {
@@ -326,14 +325,14 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 return core_types.VMError.InvalidStackArrangement;
             },
             .split => |split_instr| {
-                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
+                try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.len(), .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 main_context.ip = split_instr.left;
             },
             .repeat_start => |rep| {
                 try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0, .escape_jmp = rep.escape_jmp } });
-                main_context.current_rep_ptr = main_context.stack.size - 1;
+                main_context.current_rep_ptr = main_context.stack.elementCount() - 1;
                 if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
-                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.data.len, .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
+                    try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.len(), .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });
                 } // repeat_end points to the instruction after the repeat_start, which is the instruction in the context here.
             },
             .repeat_end => |end| {
@@ -363,7 +362,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
             },
             .capture_start => |cap| {
                 try main_context.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = main_context.current_group_ptr } });
-                main_context.current_group_ptr = main_context.stack.size - 1; // Top of the stack just pushed to is the group_ptr.
+                main_context.current_group_ptr = main_context.stack.elementCount() - 1; // Top of the stack just pushed to is the group_ptr.
                 (try main_context.currentGroupReference()).* = .{ .start = main_context.str_ptr, .end = 0 };
             },
             .capture_end => {
@@ -526,4 +525,3 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
     }
     return null;
 }
-

@@ -27,12 +27,12 @@ int main(int argc, char **argv) {
         }
         const ZIG_OPTIONAL(size_t) match_id_container = zregex_name_to_id(compiled_pattern, "test");
         if (match_id_container.present) {
-            printf("Testing id fetch from name \"test\": %llu\n", match_id_container.value);
+            printf("Testing id fetch from name \"test\": %zu\n", match_id_container.value);
         } else {
             printf("Testing id fetch from name \"test\": NULL\n");
         }
         for (size_t id=0; id<my_match->group_count; id++) {
-            printf("Group %llu", id);
+            printf("Group %zu", id);
             const char *name = zregex_id_to_name(compiled_pattern, id);
             if (name != NULL) {
                 printf(" <%s>", name);
