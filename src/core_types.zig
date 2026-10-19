@@ -77,3 +77,7 @@ pub const VMError = error{
     InvalidStackAccess,
     NullIndexAccess,
 };
+
+pub const AnalysisError = error{
+    UnknownLength,
+};

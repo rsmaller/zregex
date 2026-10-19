@@ -16,7 +16,6 @@ pub fn mapNames(allocator: anytype, ast: *ast_types.ASTNode) !NameIDMap {
 
 pub fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usize), id_to_name_map: *std.AutoHashMap(usize, []const u8), ast: *ast_types.ASTNode) !void {
     switch(ast.*) {
-        .leaf_atom => {},
         .concatenation => |concat| {
             for (concat.parts) |part| {
                 try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, part);
@@ -41,7 +40,7 @@ pub fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(
         .repetition => |rep| {
             try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, rep.child);
         },
-        .class => {},
-        .epsilon, .failed_parse => {},
+        .class, .failed_parse, .epsilon, .leaf_atom => {},
+        // Does not use an else clause so the compiler errors when other cases that might need to be handled aren't.
     }
 }

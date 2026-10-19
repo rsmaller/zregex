@@ -86,6 +86,13 @@ const VMExecutionContext = struct {
             return core_types.VMError.NullIndexAccess;
         }
     }
+    pub fn groupIndex(self: *@This(), id: usize) !?vm_execution_types.IntermediateMatchGroup {
+        if (self.groups) |grps| {
+            return grps[id];
+        } else {
+            return core_types.VMError.NullIndexAccess;
+        }
+    }
     pub fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !bool { // Returns false when there is no fallback.
         while (self.stack.hasItem()) {
             const current_item = try self.stack.pop(allocator);
@@ -467,6 +474,19 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 } else {
                     if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
+                    }
+                }
+            },
+            .backref => |id| {
+                const group_compare_slice = try main_context.groupIndex(id);
+                if (group_compare_slice) |slice| {
+                    const len: usize = slice.end - slice.start;
+                    if (std.mem.eql(u8, string[slice.start..slice.end], string[main_context.str_ptr..])) {
+                        main_context.str_ptr += len;
+                    } else {
+                        if (!try main_context.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
+                            return null;
+                        }
                     }
                 }
             },

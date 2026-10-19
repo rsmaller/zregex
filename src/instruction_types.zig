@@ -51,5 +51,6 @@ pub const Instruction = union(enum) {
         jmp: usize,
     },
     neg_lookbehind_end: void,
+    backref: usize,
     class: u256, // binary-optimized for every 8-bit character.
 };

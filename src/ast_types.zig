@@ -66,6 +66,7 @@ pub const GroupNode = struct {
 pub const LeafAtomNode = struct {
     leaf_atom: union(enum) {
         generic: u8,
+        backref: usize, // Refers to a group.
         digit: void,
         word: void,
         word_boundary: void,
@@ -94,6 +95,11 @@ pub const LeafAtomNode = struct {
                     return false;
                 }
                 if (range.character_max != other.leaf_atom.range.character_max) {
+                    return false;
+                }
+            },
+            .backref => |backref| {
+                if (backref != other.leaf_atom.backref) {
                     return false;
                 }
             },
@@ -197,8 +203,8 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
                     return false;
                 }
             },
-            .class => |classItem| {
-                if (!classItem.equals(other_unwrapped_pointer.class)) {
+            .class => |class_item| {
+                if (!class_item.equals(other_unwrapped_pointer.class)) {
                     return false;
                 }
             },

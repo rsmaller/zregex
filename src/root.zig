@@ -125,6 +125,9 @@ pub fn printBytecode(out_interface: anytype, pattern: core_types.Pattern) void {
             .neg_lookbehind_end => {
                 out_interface.print("NEG_LOOKBEHIND_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
             },
+            .backref => |id| {
+                out_interface.print("BACKREF(id={d})\n", .{ id }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+            },
         }
     }
 }
@@ -134,15 +137,26 @@ fn printASTRecursive(out_interface: anytype, ast: *ast_types.ASTNode, options: A
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
-    const len: repetition_types.RepetitionRangeType = parser.matchRequirementRange(ast);
+    const len = parser.matchRequirementRange(ast);
     if (options.show_match_width) {
-        switch (len.max) {
-            .bounded => {
-                try out_interface.print("[Requisite match width is {d} - {d}] -> ", .{ len.min, len.max.bounded });
-            },
-            .unbounded => {
-                try out_interface.print("[Requisite match width is {d} - inf] -> ", .{len.min});
-            },
+        if (len) |non_error_len| {
+            switch (non_error_len.max) {
+                .bounded => {
+                    try out_interface.print("[Requisite match width is {d} - {d}] -> ", .{ non_error_len.min, non_error_len.max.bounded });
+                },
+                .unbounded => {
+                    try out_interface.print("[Requisite match width is {d} - inf] -> ", .{non_error_len.min});
+                },
+            }
+        } else |err| {
+            switch (err) {
+                error.UnknownLength => {
+                    try out_interface.print("[Requisite match width is UNKNOWN] -> ", .{});
+                },
+                // else => { // Not currently necessary; left here for when other analysis errors are added to that error union.
+                //     return err;
+                // }
+            }
         }
     }
     switch (ast.*) {
@@ -277,6 +291,9 @@ fn printLeafAtom(out_interface: anytype, leaf: ast_types.LeafAtomNode) !void { /
                 buf2[1] = 0;
             }
             try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
+        },
+        .backref => |id| {
+            try out_interface.print("BACKREF(id = {d})\n", .{ id });
         },
         else => {
             try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{ @tagName(leaf.leaf_atom), leaf.inverted });

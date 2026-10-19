@@ -125,27 +125,27 @@ fn alternationBound(a: repetition_types.RepetitionRangeType, b: repetition_types
     }
 }
 
-pub fn matchRequirementRange(ast: *const ast_types.ASTNode) repetition_types.RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
+pub fn matchRequirementRange(ast: *const ast_types.ASTNode) core_types.AnalysisError!repetition_types.RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
     var result = repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
     switch (ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
-            return matchRequirementRange(grp.expr);
+            return try matchRequirementRange(grp.expr);
         }, // outside of group, just recurse.
         .alternation => |alt| {
-            result = matchRequirementRange(alt.parts[0]);
+            result = try matchRequirementRange(alt.parts[0]);
             for (alt.parts[1..]) |item| {
-                result = alternationBound(result, matchRequirementRange(item));
+                result = alternationBound(result, try matchRequirementRange(item));
             }
             return result;
         },
         .concatenation => |concat| {
             for (concat.parts) |item| {
-                result = addBound(result, matchRequirementRange(item));
+                result = addBound(result, try matchRequirementRange(item));
             }
             return result;
         },
         .repetition => |rep| {
-            return timesBound(rep.reps, matchRequirementRange(rep.child));
+            return timesBound(rep.reps, try matchRequirementRange(rep.child));
         },
         .class => {
             return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
@@ -154,6 +154,9 @@ pub fn matchRequirementRange(ast: *const ast_types.ASTNode) repetition_types.Rep
             switch (leaf.leaf_atom) {
                 .word_boundary, .start_anchor, .end_anchor => {
                     return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
+                },
+                .backref => {
+                    return core_types.AnalysisError.UnknownLength;
                 },
                 else => {
                     return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
@@ -204,7 +207,7 @@ pub fn trimAST(ast: *ast_types.ASTNode, allocator: anytype) !void {
                 .non_capturing => |non_capt| {
                     switch (non_capt) {
                         .lookbehind => {
-                            const len = matchRequirementRange(grp.expr);
+                            const len = matchRequirementRange(grp.expr) catch { return core_types.ParsingError.VariableLookbehindRange; };
                             switch (len.max) {
                                 .unbounded => {
                                     return core_types.ParsingError.VariableLookbehindRange;
@@ -355,8 +358,8 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         i.* += 1; // Consume '('.
         const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
         result.* = .failed_parse;
-        errdefer result.deinit(allocator); // Only defers inside this if statement.
-        if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // check all possible lookahead flags if safe to do so.
+        errdefer result.deinit(allocator);
+        if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // Check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
                 result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{
@@ -465,13 +468,13 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         atom = try parseCharClass(allocator, str_to_parse, i);
     } else {
         atom.* = .{
-            .leaf_atom = fetchCharLeafAtom(char_to_set, metacharacter) catch |err| {
+            .leaf_atom = fetchCharLeafAtom(char_to_set, metacharacter, str_to_parse, i) catch |err| {
                 allocator.destroy(atom);
                 return err; // Manually catch/free with erroring to prevent double-free.
             },
         };
     }
-    i.* += 1; // Consume most recently used character, either the current token or the end of char class.
+    i.* += 1; // Consume most recently used character, either the current token or the end of char class. If this leaf is a backreference, that would be the last digit of the ID.
     if (i.* >= str_to_parse.len) return atom; // Only if at end of string, otherwise check for repetition.
     return checkQuantifiers(atom, allocator, str_to_parse, i) catch |err| {
         allocator.destroy(atom);
@@ -479,7 +482,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
     };
 }
 
-fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !ast_types.LeafAtomNode {
+fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool, str_to_parse: []const u8, i: *usize) !ast_types.LeafAtomNode {
     switch (metacharacter) {
         true => {
             switch (char_to_set) {
@@ -516,6 +519,17 @@ fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool) !ast_types.LeafAtomNo
                 '.' => {
                     return .{ .leaf_atom = .any, .inverted = false };
                 },
+                '0'...'9' => { // Parse a backreference.
+                    var z = i.*;
+                    const num = try scanNumeric(str_to_parse, &z);
+                    if (z > i.*) {
+                        i.* = z - 1; // This method can scan backreferences, but it does not parse an entire unit.
+                                     // The parser expects a single consumable character after this function is called.
+                    } else {
+                        return core_types.ParsingError.TokenNotFound;
+                    }
+                    return .{ .leaf_atom = .{ .backref =  num }, .inverted = false };
+                },
                 '(', ')', '[', ']', '{', '}', '|' => {
                     return core_types.ParsingError.TokenNotFound;
                 },
@@ -543,7 +557,7 @@ fn isDefaultMetacharacter(character: u8) bool {
 
 fn isEscapedMetacharacter(character: u8) bool {
     switch (character) {
-        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W' => {
+        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', '0'...'9' => {
             return true;
         },
         else => {
@@ -575,6 +589,14 @@ fn assertRepetitionAllowance(atom: *ast_types.ASTNode) !void {
         },
         else => {},
     }
+}
+
+// Scans through the string, grabs numeric component
+fn scanNumeric(str_to_scan: []const u8, i: *usize) !usize {
+    const num_slice_len = i.* + (std.mem.indexOfNone(u8, str_to_scan[i.*..], "0123456789") orelse str_to_scan.len - i.*); // Grab the index where the numeric component of string ends.
+    const number = try std.fmt.parseUnsigned(usize, str_to_scan[i.*..num_slice_len], 10); // Slice through numeric component and grab int value.
+    i.* = num_slice_len;
+    return number;
 }
 
 fn checkQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
@@ -609,9 +631,7 @@ fn checkQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
             if (str_to_parse[i.*] == ',') { // If no number is present before the , then the min is 0.
                 count_min = 0;
             } else {
-                const num_slice_index_min = i.* + (std.mem.indexOfNone(u8, str_to_parse[i.*..], "0123456789") orelse str_to_parse.len - i.*); // Grab the index where the numeric component of string ends.
-                count_min = try std.fmt.parseUnsigned(usize, str_to_parse[i.*..num_slice_index_min], 10); // Slice through numeric component and grab int value.
-                i.* = num_slice_index_min; // Set i to what was caught by integer conversion.
+                count_min = try scanNumeric(str_to_parse, i);
             }
             if (str_to_parse[i.*] != ',') { // If comma is not encountered, it is one number so min and max should be the same.
                 count_max = .{ .bounded = count_min };
@@ -623,9 +643,7 @@ fn checkQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
                 if (str_to_parse[i.*] == '}') { // If comma is encountered but no ending number is found, then max is the largest possible int.
                     count_max = .unbounded;
                 } else {
-                    const num_slice_index_max = i.* + (std.mem.indexOfNone(u8, str_to_parse[i.*..], "0123456789") orelse str_to_parse.len - i.*); // Same arithmetic as with min.
-                    count_max = .{ .bounded = try std.fmt.parseUnsigned(usize, str_to_parse[i.*..num_slice_index_max], 10) };
-                    i.* = num_slice_index_max;
+                    count_max = .{ .bounded = try scanNumeric(str_to_parse, i) };
                 }
             }
             if (i.* >= str_to_parse.len or str_to_parse[i.*] != '}') {

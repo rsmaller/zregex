@@ -93,6 +93,9 @@ fn leafToLiteralInstruction(leaf: ast_types.LeafAtomNode) !instruction_types.Lit
         .whitespace => {
             ret.data = .whitespace;
         },
+        .backref => {
+            return core_types.BytecodeGenError.InvalidTypeConversion;
+        },
         .range => {
             return core_types.BytecodeGenError.InvalidTypeConversion;
         },
@@ -103,7 +106,14 @@ fn leafToLiteralInstruction(leaf: ast_types.LeafAtomNode) !instruction_types.Lit
 fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), ast: *ast_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
     switch (ast.*) {
         .leaf_atom => |leaf| {
-            _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
+            switch(leaf.leaf_atom) {
+                .backref => |id| { // Backreferences are only handled as leaf nodes because of where they are handled in parsing; they do not correspond to a literal in bytecode.
+                    _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id }, instruction_ptr);
+                },
+                else => {
+                    _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
+                }
+            }
         },
         .repetition => |rep| {
             const rep_start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_start = .{ .min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type, .escape_jmp = 0 } }, instruction_ptr);
@@ -213,7 +223,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                     .word => {
                         mask_change_val = ALPHANUM_MASK;
                     },
-                    .word_boundary, .start_anchor, .end_anchor, .any => {
+                    .word_boundary, .start_anchor, .end_anchor, .any, .backref => {
                         return core_types.BytecodeGenError.InvalidClassMember;
                     },
                     .whitespace => {
