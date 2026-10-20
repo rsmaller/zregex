@@ -1,6 +1,7 @@
 // AST types organized into a single file; accessible via core_types.zig.
 const std = @import("std");
 const type_reflection = @import("type_reflection.zig");
+const core_types = @import("core_types.zig");
 const repetition_types = @import("repetition_types.zig");
 
 pub const RepetitionNode = struct { // Parent node to another node constructed by a quantifier.
@@ -158,7 +159,7 @@ pub const ClassNode = struct { // Character class.
     }
 };
 
-pub const ASTNode = union(enum) { // Tagged union for node type.
+pub const ASTNode = union(enum) {
     leaf_atom: LeafAtomNode,
     concatenation: ConcatenationNode,
     alternation: AlternationNode,
@@ -252,7 +253,14 @@ pub const ASTNode = union(enum) { // Tagged union for node type.
     }
 };
 
-pub const GroupSizedAST = struct { // User-facing AST returned.
+pub const AnalyzedAST = struct { // User-facing AST returned.
     ast: *ASTNode,
     group_count: usize,
+    map: core_types.NameIDMap,
+    allocator: std.mem.Allocator, // The analyzed AST
+    pub fn deinit(self: *@This()) void {
+        self.ast.deinit(self.allocator); // For the sake of not bloating the namespace, and not exploding the size of the AST, each node does not contain its own allocator.
+        self.map.name_to_id_map.deinit();
+        self.map.id_to_name_map.deinit();
+    }
 };

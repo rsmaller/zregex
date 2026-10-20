@@ -6,11 +6,15 @@ const vm = @import("vm.zig");
 // Imported types from sorted files.
 const ast_types = @import("ast_types.zig");
 const instruction_types = @import("instruction_types.zig");
-const name_map = @import("name_map.zig");
+
+pub const NameIDMap = struct {
+    name_to_id_map: std.StringHashMap(usize),
+    id_to_name_map: std.AutoHashMap(usize, []const u8),
+};
 
 pub const Pattern = struct {
     ast: ?*ast_types.ASTNode,
-    map: name_map.NameIDMap,
+    map: NameIDMap,
     bytecode: []instruction_types.Instruction,
     allocator: std.mem.Allocator,
     pub fn match(self: *const Pattern, allocator: anytype, string: []const u8) !?Match {

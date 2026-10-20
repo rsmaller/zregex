@@ -7,250 +7,16 @@ const ast_types = @import("ast_types.zig");
 
 var EPSILON_UNIT: ast_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
-pub fn setGroupIDs(ast: *ast_types.ASTNode, id: *usize) !void {
-    switch (ast.*) {
-        .group => |grp| { // set ID, increment, and then recurse for group.
-            switch (grp.type) {
-                .capturing => {
-                    ast.group.id = id.*;
-                    id.* += 1;
-                },
-                .non_capturing => {
-                    ast.group.id = null;
-                },
-            }
-            try setGroupIDs(grp.expr, id);
-        }, // outside of group, just recurse.
-        .alternation => |alt| {
-            for (alt.parts) |item| {
-                try setGroupIDs(item, id);
-            }
-        },
-        .concatenation => |concat| {
-            for (concat.parts) |item| {
-                try setGroupIDs(item, id);
-            }
-        },
-        .repetition => |rep| {
-            try setGroupIDs(rep.child, id);
-        },
-        .class => {
-            return;
-        },
-        else => {
-            return;
-        },
+pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) anyerror!*ast_types.ASTNode {
+    var i: usize = 0;
+    var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
+    errdefer {
+        ast.deinit(allocator);
     }
-}
-
-fn isEqualBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) bool {
-    if (@intFromEnum(a.max) != @intFromEnum(b.max)) return false;
-    switch (a.max) {
-        .bounded => {
-            return (a.min == b.min) and (a.max.bounded == b.max.bounded);
-        },
-        .unbounded => {
-            return a.min == b.min;
-        },
+    if (i != str_to_parse.len) {
+        return core_types.ParsingError.EndOfString;
     }
-}
-
-fn addBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) repetition_types.RepetitionRangeType {
-    var result = a;
-    result.min += b.min;
-    switch (a.max) {
-        .unbounded => {
-            return result;
-        },
-        else => {
-            switch (b.max) {
-                .unbounded => {
-                    result.max = .unbounded;
-                    return result;
-                },
-                .bounded => {
-                    result.max.bounded += b.max.bounded;
-                    return result;
-                },
-            }
-        },
-    }
-}
-
-fn timesBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) repetition_types.RepetitionRangeType {
-    var result = a;
-    result.min *= b.min;
-    switch (a.max) {
-        .unbounded => {
-            return result;
-        },
-        else => {
-            switch (b.max) {
-                .unbounded => {
-                    result.max = .unbounded;
-                    return result;
-                },
-                else => {
-                    result.max.bounded *= b.max.bounded;
-                    return result;
-                },
-            }
-        },
-    }
-}
-
-fn alternationBound(a: repetition_types.RepetitionRangeType, b: repetition_types.RepetitionRangeType) repetition_types.RepetitionRangeType {
-    var result = a;
-    if (a.min > b.min) {
-        result.min = b.min;
-    }
-    switch (a.max) {
-        .unbounded => {
-            return result;
-        },
-        else => {
-            switch (b.max) {
-                .unbounded => {
-                    result.max = .unbounded;
-                    return result;
-                },
-                else => {
-                    if (a.max.bounded < b.max.bounded) {
-                        result.max.bounded = b.max.bounded;
-                    }
-                    return result;
-                },
-            }
-        },
-    }
-}
-
-pub fn matchRequirementRange(ast: *const ast_types.ASTNode) core_types.AnalysisError!repetition_types.RepetitionRangeType { // This function checks the width of characters that may be represented by an AST; it does NOT check how many characters the resulting bytecode will consume.
-    var result = repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
-    switch (ast.*) {
-        .group => |grp| { // set ID, increment, and then recurse for group.
-            return try matchRequirementRange(grp.expr);
-        }, // outside of group, just recurse.
-        .alternation => |alt| {
-            result = try matchRequirementRange(alt.parts[0]);
-            for (alt.parts[1..]) |item| {
-                result = alternationBound(result, try matchRequirementRange(item));
-            }
-            return result;
-        },
-        .concatenation => |concat| {
-            for (concat.parts) |item| {
-                result = addBound(result, try matchRequirementRange(item));
-            }
-            return result;
-        },
-        .repetition => |rep| {
-            return timesBound(rep.reps, try matchRequirementRange(rep.child));
-        },
-        .class => {
-            return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
-        },
-        .leaf_atom => |leaf| {
-            switch (leaf.leaf_atom) {
-                .word_boundary, .start_anchor, .end_anchor => {
-                    return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
-                },
-                .backref => {
-                    return core_types.AnalysisError.UnknownLength;
-                },
-                else => {
-                    return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
-                },
-            }
-        },
-        .epsilon, .failed_parse => {
-            return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
-        },
-    }
-}
-
-// Makes a copy of an array without duplicates, in-order. Assumes that pointer elements are heap-allocated and single-pointers.
-// Types must be trivially comparable or structs/unions that implement an equals() method for duplicate checking.
-fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
-    const T = @TypeOf(arr[0]);
-    var list = try std.ArrayList(T).initCapacity(allocator, 1);
-    var freed = try allocator.alloc(bool, arr.len);
-    defer allocator.free(freed);
-    @memset(freed, false);
-    for (arr, 0..) |item, i| {
-        if (freed[i]) continue;
-        try list.append(allocator, item);
-        for (i + 1..arr.len) |j| {
-            if (type_reflection.genericEqualityDispatch(arr[i], arr[j])) {
-                freed[j] = true;
-                switch (@typeInfo(T)) {
-                    .pointer => |ptr| {
-                        if (ptr.child == ast_types.ASTNode) {
-                            arr[j].deinit(allocator);
-                        } else {
-                            try allocator.free(arr[j]);
-                        }
-                    },
-                    else => {},
-                }
-            }
-        }
-    }
-    return try list.toOwnedSlice(allocator);
-}
-
-pub fn trimAST(ast: *ast_types.ASTNode, allocator: anytype) !void {
-    switch (ast.*) {
-        .group => |grp| {
-            switch (grp.type) {
-                .capturing => {},
-                .non_capturing => |non_capt| {
-                    switch (non_capt) {
-                        .lookbehind => {
-                            const len = matchRequirementRange(grp.expr) catch { return core_types.ParsingError.VariableLookbehindRange; };
-                            switch (len.max) {
-                                .unbounded => {
-                                    return core_types.ParsingError.VariableLookbehindRange;
-                                },
-                                .bounded => {
-                                    if (len.max.bounded != len.min) {
-                                        return core_types.ParsingError.VariableLookbehindRange;
-                                    }
-                                    ast.group.type.non_capturing.lookbehind = len.max.bounded;
-                                },
-                            }
-                        },
-                        else => {},
-                    }
-                },
-            }
-            try trimAST(grp.expr, allocator);
-        }, // outside of group, just recurse.
-        .alternation => {
-            const old_alt_parts = ast.alternation.parts;
-            ast.alternation.parts = try removeDuplicates(allocator, ast.alternation.parts);
-            allocator.free(old_alt_parts);
-            for (ast.alternation.parts) |item| {
-                try trimAST(item, allocator); // recurse after trimming.
-            }
-        },
-        .concatenation => |concat| {
-            for (concat.parts) |item| {
-                try trimAST(item, allocator);
-            }
-        },
-        .repetition => |rep| {
-            try trimAST(rep.child, allocator);
-        },
-        .class => {
-            const old_cls_items = ast.class.items;
-            ast.class.items = try removeDuplicates(allocator, ast.class.items);
-            allocator.free(old_cls_items);
-        },
-        else => {
-            return;
-        },
-    }
+    return ast;
 }
 
 fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
@@ -524,11 +290,11 @@ fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool, str_to_parse: []const
                     const num = try scanNumeric(str_to_parse, &z);
                     if (z > i.*) {
                         i.* = z - 1; // This method can scan backreferences, but it does not parse an entire unit.
-                                     // The parser expects a single consumable character after this function is called.
+                        // The parser expects a single consumable character after this function is called.
                     } else {
                         return core_types.ParsingError.TokenNotFound;
                     }
-                    return .{ .leaf_atom = .{ .backref =  num }, .inverted = false };
+                    return .{ .leaf_atom = .{ .backref = num }, .inverted = false };
                 },
                 '(', ')', '[', ']', '{', '}', '|' => {
                     return core_types.ParsingError.TokenNotFound;
@@ -837,19 +603,4 @@ fn printLeafAtom(out_interface: anytype, leaf: ast_types.LeafAtomNode) !void {
             try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{ @tagName(leaf.leaf_atom), leaf.inverted });
         },
     }
-}
-
-pub fn compile(allocator: anytype, str_to_parse: []const u8) anyerror!ast_types.GroupSizedAST {
-    var i: usize = 0;
-    var j: usize = 1; // ID 0 is reserved for whole match.
-    var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
-    errdefer {
-        ast.deinit(allocator);
-    }
-    if (i != str_to_parse.len) {
-        return core_types.ParsingError.TokenNotFound;
-    }
-    try setGroupIDs(ast, &j);
-    try trimAST(ast, allocator);
-    return .{ .ast = ast, .group_count = j };
 }

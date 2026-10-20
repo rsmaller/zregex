@@ -1,4 +1,5 @@
 const std = @import("std");
+const analyzer = @import("analyzer.zig");
 const parser = @import("parser.zig");
 const codegen = @import("codegen.zig");
 const core_util = @import("core_util.zig");
@@ -6,11 +7,10 @@ const vm = @import("vm.zig");
 const instruction_types = @import("instruction_types.zig");
 const ast_types = @import("ast_types.zig");
 const repetition_types = @import("repetition_types.zig");
-const name_map = @import("name_map.zig");
 pub const type_reflection = @import("type_reflection.zig"); // Provided to the end user for declaration checks; they are useful!
 pub const core_types = @import("core_types.zig"); // The only type interface to be exposed to the user.
 
-pub const Pattern = core_types.Pattern;
+pub const Pattern = core_types.Pattern; // A fully compiled pattern with name mappings, the AST, and the bytecode.
 
 pub const Match = core_types.SlicedMatch;
 
@@ -19,114 +19,168 @@ pub const ASTPrintOptions = extern struct {
 };
 
 pub fn compile(allocator: anytype, str_to_parse: []const u8) !Pattern {
-    var sized_ast = try parser.compile(allocator, str_to_parse);
-    errdefer sized_ast.ast.deinit(allocator);
-    var mapping = try name_map.mapNames(allocator, sized_ast.ast);
-    errdefer {
-        mapping.id_to_name_map.deinit();
-        mapping.name_to_id_map.deinit();
-    }
-    const bytecode = try codegen.emit(allocator, sized_ast.ast, sized_ast.group_count);
+    var ast = try parser.compileToAST(allocator, str_to_parse);
+    var analyzed_ast = analyzer.analyze(allocator, ast) catch |err| { // Only deinit the ast directly if analysis fails.
+        ast.deinit(allocator);
+        return err;
+    };
+    errdefer analyzed_ast.deinit(); // If errors occur elsewhere, deinit the entire analyzed ast including ast.
+    const bytecode = try codegen.emit(allocator, analyzed_ast);
     // No need to defer at end; failure means it was never allocated.
     return Pattern{
-        .ast = sized_ast.ast,
-        .map = mapping,
+        .ast = analyzed_ast.ast,
+        .map = analyzed_ast.map,
         .bytecode = bytecode,
-        .allocator = allocator,
+        .allocator = allocator, // The compile function, analyzer, and codegen are all done under one allocator which is stored here.
     };
 }
 
 pub fn printAST(out_interface: anytype, pattern: core_types.Pattern, options: ASTPrintOptions) void {
     if (pattern.ast) |ast| {
-        printASTRecursive(out_interface, ast, options, 0) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+        printASTRecursive(out_interface, ast, options, 0) catch |err| {
+            std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+        };
     } else {
-        out_interface.print("<Null AST>\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+        out_interface.print("<Null AST>\n", .{}) catch |err| {
+            std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+        };
     }
-
 }
 
 pub fn printBytecode(out_interface: anytype, pattern: core_types.Pattern) void {
     const bytecode: []instruction_types.Instruction = pattern.bytecode;
     for (0..bytecode.len) |i| {
-        out_interface.print("{d}:\t", .{i}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+        out_interface.print("{d}:\t", .{i}) catch |err| {
+            std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+        };
         switch (bytecode[i]) {
             .header_start => {
-                out_interface.print("HEADER_START\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("HEADER_START\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .header_end => {
-                out_interface.print("HEADER_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("HEADER_END\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .allocate_groups => |alloc| {
-                out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("ALLOC_GROUPS({d})\n", .{alloc.size}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .split => |spl| {
-                out_interface.print("SPLIT({d}, {d})\n", .{ spl.left, spl.right }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("SPLIT({d}, {d})\n", .{ spl.left, spl.right }) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .jmp => |jmp| {
-                out_interface.print("JMP({d})\n", .{jmp}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("JMP({d})\n", .{jmp}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .repeat_start => |rep| {
                 switch (rep.max) {
                     .bounded => {
-                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) }) catch |err| {
+                            std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                        };
                     },
                     .unbounded => {
-                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) }) catch |err| {
+                            std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                        };
                     },
                 }
             },
             .repeat_end => |rep_end| {
-                out_interface.print("REP_END(jmp={d})\n", .{rep_end}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("REP_END(jmp={d})\n", .{rep_end}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .class => |class_binary| {
-                out_interface.print("CLASS(", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("CLASS(", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
                 core_util.print_binary(out_interface, class_binary, .{ .show_leading_zeroes = false });
-                out_interface.print(")\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print(")\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .end_match => {
-                out_interface.print("MATCH\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("MATCH\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .literal => |lit| {
-                printLiteralInstruction(out_interface, lit) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                printLiteralInstruction(out_interface, lit) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .capture_start => |cap| {
-                out_interface.print("CAP_START(id={d})\n", .{cap}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("CAP_START(id={d})\n", .{cap}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .capture_end => |cap| {
-                out_interface.print("CAP_END(id={d})\n", .{cap}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("CAP_END(id={d})\n", .{cap}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .atomic_start => {
-                out_interface.print("ATOMIC_START\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("ATOMIC_START\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .atomic_end => {
-                out_interface.print("ATOMIC_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("ATOMIC_END\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .lookahead_start => {
-                out_interface.print("LOOKAHEAD_START\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("LOOKAHEAD_START\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .lookahead_end => {
-                out_interface.print("LOOKAHEAD_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("LOOKAHEAD_END\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .lookbehind_start => |len| {
-                out_interface.print("LOOKBEHIND_START(len={d})\n", .{len}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("LOOKBEHIND_START(len={d})\n", .{len}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .lookbehind_end => {
-                out_interface.print("LOOKBEHIND_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("LOOKBEHIND_END\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .neg_lookahead_start => |jmp| {
-                out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("NEG_LOOKAHEAD_START(jmp={d})\n", .{jmp}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .neg_lookahead_end => {
-                out_interface.print("NEG_LOOKAHEAD_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("NEG_LOOKAHEAD_END\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .neg_lookbehind_start => |neg_lookbehind| {
-                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp }) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .neg_lookbehind_end => {
-                out_interface.print("NEG_LOOKBEHIND_END\n", .{}) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("NEG_LOOKBEHIND_END\n", .{}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
             .backref => |id| {
-                out_interface.print("BACKREF(id={d})\n", .{ id }) catch |err| { std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)}); };
+                out_interface.print("BACKREF(id={d})\n", .{id}) catch |err| {
+                    std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
+                };
             },
         }
     }
@@ -137,8 +191,8 @@ fn printASTRecursive(out_interface: anytype, ast: *ast_types.ASTNode, options: A
     for (0..recursion_level) |_| {
         try out_interface.print("\t", .{});
     }
-    const len = parser.matchRequirementRange(ast);
     if (options.show_match_width) {
+        const len = analyzer.matchRequirementRange(ast);
         if (len) |non_error_len| {
             switch (non_error_len.max) {
                 .bounded => {
@@ -293,7 +347,7 @@ fn printLeafAtom(out_interface: anytype, leaf: ast_types.LeafAtomNode) !void { /
             try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
         },
         .backref => |id| {
-            try out_interface.print("BACKREF(id = {d})\n", .{ id });
+            try out_interface.print("BACKREF(id = {d})\n", .{id});
         },
         else => {
             try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{ @tagName(leaf.leaf_atom), leaf.inverted });

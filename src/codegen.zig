@@ -3,9 +3,10 @@ const core_types = @import("core_types.zig");
 const core_util = @import("core_util.zig");
 const ast_types = @import("ast_types.zig");
 const instruction_types = @import("instruction_types.zig");
-const name_map = @import("name_map.zig");
 
-pub fn emit(allocator: anytype, ast: *ast_types.ASTNode, group_count: usize) ![]instruction_types.Instruction {
+pub fn emit(allocator: anytype, analyzed_ast: ast_types.AnalyzedAST) ![]instruction_types.Instruction {
+    const ast = analyzed_ast.ast;
+    const group_count = analyzed_ast.group_count;
     var labels: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
     defer labels.deinit(allocator);
     var fixups: std.ArrayList(usize) = try std.ArrayList(usize).initCapacity(allocator, 8);
@@ -106,13 +107,13 @@ fn leafToLiteralInstruction(leaf: ast_types.LeafAtomNode) !instruction_types.Lit
 fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), ast: *ast_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
     switch (ast.*) {
         .leaf_atom => |leaf| {
-            switch(leaf.leaf_atom) {
+            switch (leaf.leaf_atom) {
                 .backref => |id| { // Backreferences are only handled as leaf nodes because of where they are handled in parsing; they do not correspond to a literal in bytecode.
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id }, instruction_ptr);
                 },
                 else => {
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
-                }
+                },
             }
         },
         .repetition => |rep| {
