@@ -12,6 +12,10 @@ pub const NameIDMap = struct {
     id_to_name_map: std.AutoHashMap(usize, []const u8),
 };
 
+pub const ASTPrintOptions = extern struct {
+    show_match_width: bool = false,
+};
+
 pub const Pattern = struct {
     ast: ?*ast_types.ASTNode,
     map: NameIDMap,

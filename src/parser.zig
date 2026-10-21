@@ -7,7 +7,7 @@ const ast_types = @import("ast_types.zig");
 
 var EPSILON_UNIT: ast_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
-pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) anyerror!*ast_types.ASTNode {
+pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) !*ast_types.ASTNode {
     var i: usize = 0;
     var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
     errdefer {
@@ -20,6 +20,8 @@ pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) anyerror!*ast_
 }
 
 fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
+    const len = str_to_parse.len;
+    if (i.* >= len) return core_types.ParsingError.EndOfString;
     var result = try allocator.create(ast_types.ASTNode);
     errdefer result.deinit(allocator);
     result.* = .failed_parse;
@@ -32,7 +34,6 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
             item.deinit(allocator);
         }
     }
-    if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString; // Error out after deferring.
     var currentTerm: *ast_types.ASTNode = undefined;
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
         currentTerm = &EPSILON_UNIT;
@@ -40,9 +41,9 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
         currentTerm = try parseTerm(allocator, str_to_parse, i);
     }
     try result_list.append(allocator, currentTerm);
-    while (i.* < str_to_parse.len and str_to_parse[i.*] == '|') { // Parse through pipes as arguments.
+    while (i.* < len and str_to_parse[i.*] == '|') { // Parse through pipes as arguments.
         i.* += 1;
-        if (i.* >= str_to_parse.len) {
+        if (i.* >= len) {
             break;
         }
         if (str_to_parse[i.*] == ')') { // Handle epsilon as the last alternation argument.
@@ -62,7 +63,8 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
 }
 
 fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
-    if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
+    const len = str_to_parse.len;
+    if (i.* >= len) return core_types.ParsingError.EndOfString;
     var result = try allocator.create(ast_types.ASTNode);
     errdefer result.deinit(allocator);
     result.* = .failed_parse;
@@ -77,7 +79,7 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     }
     var currentFactor = try parseFactor(allocator, str_to_parse, i);
     try result_list.append(allocator, currentFactor);
-    while (i.* < str_to_parse.len and str_to_parse[i.*] != '|' and str_to_parse[i.*] != ')') { // If character pointed to is handled by expr or factor, break.
+    while (i.* < len and str_to_parse[i.*] != '|' and str_to_parse[i.*] != ')') { // If character pointed to is handled by expr or factor, break.
         currentFactor = try parseFactor(allocator, str_to_parse, i);
         try result_list.append(allocator, currentFactor);
     }
@@ -91,108 +93,24 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
-fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!ast_types.ASTNode {
-    if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
-    var result_list = try std.ArrayList(ast_types.LeafAtomNode).initCapacity(allocator, 1);
-    defer {
-        result_list.deinit(allocator);
-    }
-    var negated: bool = false;
-    if (str_to_parse[i.*] == '^') { // handle ^ negation edge case for first part char class.
-        negated = true;
-        i.* += 1;
-        if (i.* >= str_to_parse.len) {
-            return core_types.ParsingError.EndOfString;
-        }
-    }
-    var item: ast_types.LeafAtomNode = undefined;
-    while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
-        item = try fetchCharOrRangeInClass(str_to_parse, i); // Parse the first item in the class.
-        try result_list.append(allocator, item);
-        i.* += 1;
-    }
-    if (i.* >= str_to_parse.len) {
-        return core_types.ParsingError.EndOfString;
-    }
-    const list_slice = try result_list.toOwnedSlice(allocator);
-    return .{ .class = .{ .items = list_slice, .negated = negated } };
-}
-
 fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
-    if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
+    const len = str_to_parse.len;
+    if (i.* >= len) return core_types.ParsingError.EndOfString;
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
-        const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
-        result.* = .failed_parse;
-        errdefer result.deinit(allocator);
-        if (i.* + 2 < str_to_parse.len and str_to_parse[i.*] == '?') {
-            if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
-                i.* += 3; // consume ?<=
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{
-                    .non_capturing = .{ .lookbehind = 0 },
-                }, .negated = false } };
-            } else if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '!') {
-                i.* += 3; // consume ?<!
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{
-                    .non_capturing = .{ .lookbehind = 0 },
-                }, .negated = true } };
-            } else if (str_to_parse[i.* + 1] == '<') {
-                var j: usize = i.* + 2;
-                while (j < str_to_parse.len and str_to_parse[j] != '>') {
-                    switch (str_to_parse[j]) {
-                        'a'...'z', 'A'...'Z', '0'...'9' => {},
-                        else => {
-                            result.* = .failed_parse;
-                            return core_types.ParsingError.InvalidGroupName;
-                        },
-                    }
-                    j += 1;
-                }
-                if (j >= str_to_parse.len) {
-                    return core_types.ParsingError.EndOfString;
-                }
-                const name: []const u8 = str_to_parse[i.* + 2 .. j];
-                i.* = j + 1;
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
-            }
-        } else if (i.* + 1 < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // Check all possible lookahead flags if safe to do so.
-            if (str_to_parse[i.* + 1] == '=') {
-                i.* += 2; // consume ?=
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
-            } else if (str_to_parse[i.* + 1] == '!') {
-                i.* += 2; // consume ?!
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
-            } else if (str_to_parse[i.* + 1] == ':') {
-                i.* += 2; // consume ?:
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
-            } else if (str_to_parse[i.* + 1] == '>') {
-                i.* += 2; // consume ?>
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
-            } else { // ? found but no matching flag.
-                return core_types.ParsingError.TokenNotFound;
-            }
-        } else if (i.* >= str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
-            return core_types.ParsingError.TokenNotFound;
-        } else { // otherwise, do regular group.
-            result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
-        }
-        if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
-            return core_types.ParsingError.TokenNotFound;
-        }
+        const result: *ast_types.ASTNode = try parseGroupExpr(allocator, str_to_parse, i);
         i.* += 1; // consume ')'
-        if (i.* < str_to_parse.len) { // Don't check quantifiers when ) is at the end of the string.
-            return try checkQuantifiers(result, allocator, str_to_parse, i);
+        if (i.* < len) { // Don't check quantifiers when ) is at the end of the string.
+            return try parseQuantifiers(result, allocator, str_to_parse, i);
         } else {
             return result;
         }
     }
-    const atom = try allocator.create(ast_types.ASTNode);
-    errdefer allocator.destroy(atom);
     var metacharacter: bool = undefined;
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
         i.* += 1; // Consume backslash.
-        if (i.* >= str_to_parse.len) {
+        if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
         }
         escaped = true;
@@ -215,135 +133,136 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             else => {},
         }
     }
+    var atom: *ast_types.ASTNode = undefined;
     if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
         i.* += 1; // Consume the '['.
-        atom.* = try parseCharClass(allocator, str_to_parse, i);
+        atom = try parseCharCLass(allocator, str_to_parse, i);
+        i.* += 1; // Consume the ']'.
     } else {
-        atom.* = .{ .leaf_atom = try fetchCharLeafAtom(char_to_set, metacharacter, str_to_parse, i) };
+        atom = try parseAtom(allocator, str_to_parse, i, char_to_set, metacharacter);
+        i.* += 1; // Consume the last character of the leaf.
     }
-    i.* += 1; // Consume most recently used character, either the end of the LeafAtom or the end of char class. If this leaf is a backreference, that would be the last digit of the ID or name delimiter >.
-    if (i.* >= str_to_parse.len) return atom; // Only if at end of string, otherwise check for repetition.
-    return try checkQuantifiers(atom, allocator, str_to_parse, i);
+    if (i.* >= len) return atom; // Only if at end of string, otherwise check for repetition.
+    return try parseQuantifiers(atom, allocator, str_to_parse, i);
 }
 
-fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool, str_to_parse: []const u8, i: *usize) !ast_types.LeafAtomNode {
-    switch (metacharacter) {
-        true => {
-            switch (char_to_set) {
-                'd' => {
-                    return .{ .leaf_atom = .digit, .inverted = false };
-                },
-                'D' => {
-                    return .{ .leaf_atom = .digit, .inverted = true };
-                },
-                's' => {
-                    return .{ .leaf_atom = .whitespace, .inverted = false };
-                },
-                'S' => {
-                    return .{ .leaf_atom = .whitespace, .inverted = true };
-                },
-                'w' => {
-                    return .{ .leaf_atom = .word, .inverted = false };
-                },
-                'W' => {
-                    return .{ .leaf_atom = .word, .inverted = true };
-                },
-                'b' => {
-                    return .{ .leaf_atom = .word_boundary, .inverted = false };
-                },
-                'B' => {
-                    return .{ .leaf_atom = .word_boundary, .inverted = true };
-                },
-                '^' => {
-                    return .{ .leaf_atom = .start_anchor, .inverted = false };
-                },
-                '$' => {
-                    return .{ .leaf_atom = .end_anchor, .inverted = false };
-                },
-                '.' => {
-                    return .{ .leaf_atom = .any, .inverted = false };
-                },
-                '0'...'9' => { // Parse a backreference.
-                    var z = i.*;
-                    const num = try scanNumeric(str_to_parse, &z);
-                    if (z > i.*) {
-                        i.* = z - 1; // This method can scan backreferences, but it does not parse an entire unit.
-                        // The parser expects a single consumable character after this function is called.
-                    } else {
-                        return core_types.ParsingError.TokenNotFound;
-                    }
-                    return .{ .leaf_atom = .{ .backref = num }, .inverted = false };
-                },
-                '(', ')', '[', ']', '{', '}', '|' => {
-                    return core_types.ParsingError.TokenNotFound;
-                },
-                else => {
-                    return .{ .leaf_atom = .{ .generic = char_to_set }, .inverted = false };
-                },
+fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
+    const len = str_to_parse.len;
+    if (i.* >= len) return core_types.ParsingError.EndOfString;
+    const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
+    result.* = .failed_parse;
+    errdefer result.deinit(allocator);
+    var lengthThreeLookaheadFound = false;
+    if (i.* + 2 < len and str_to_parse[i.*] == '?') {
+        if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
+            i.* += 3; // consume ?<=
+            const expr = try parseExpr(allocator, str_to_parse, i); // Changed to initialize in local variable to prevent defer free segfaulting at 0x0. Possible compiler bug?
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{
+                .non_capturing = .{ .lookbehind = 0 },
+            }, .negated = false } };
+            lengthThreeLookaheadFound = true;
+        } else if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '!') {
+            i.* += 3; // consume ?<!
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{
+                .non_capturing = .{ .lookbehind = 0 },
+            }, .negated = true } };
+            lengthThreeLookaheadFound = true;
+        } else if (str_to_parse[i.* + 1] == '<') {
+            var j: usize = i.* + 2;
+            while (j < len and str_to_parse[j] != '>') {
+                switch (str_to_parse[j]) {
+                    'a'...'z', 'A'...'Z', '0'...'9' => {},
+                    else => {
+                        return core_types.ParsingError.InvalidGroupName;
+                    },
+                }
+                j += 1;
             }
-        },
-        false => {
-            return .{ .leaf_atom = .{ .generic = char_to_set }, .inverted = false };
-        },
-    }
-}
-
-fn isDefaultMetacharacter(character: u8) bool {
-    switch (character) {
-        '$', '^', '.', '[', ']', '(', ')', '{', '}', '*', '+', '|', '?' => {
-            return true;
-        },
-        else => {
-            return false;
-        },
-    }
-}
-
-fn isEscapedMetacharacter(character: u8) bool {
-    switch (character) {
-        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', '0'...'9' => {
-            return true;
-        },
-        else => {
-            return false;
-        },
-    }
-}
-
-fn assertRepetitionAllowance(atom: *ast_types.ASTNode) !void {
-    switch (atom.*) { // Validate that node is allowed to be repeated.
-        .group => |grp| {
-            switch (grp.type) {
-                .non_capturing => {},
-                else => {},
+            if (j >= len) {
+                return core_types.ParsingError.EndOfString;
             }
-        },
-        .epsilon,
-        .repetition,
-        => {
+            const name: []const u8 = str_to_parse[i.* + 2 .. j];
+            i.* = j + 1;
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
+            lengthThreeLookaheadFound = true;
+        }
+    }
+    var lengthTwoLookaheadFound = false;
+    if (!lengthThreeLookaheadFound and i.* + 1 < len and str_to_parse[i.*] == '?') { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
+        if (str_to_parse[i.* + 1] == '=') {
+            i.* += 2; // consume ?=
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
+            lengthTwoLookaheadFound = true;
+        } else if (str_to_parse[i.* + 1] == '!') {
+            i.* += 2; // consume ?!
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
+            lengthTwoLookaheadFound = true;
+        } else if (str_to_parse[i.* + 1] == ':') {
+            i.* += 2; // consume ?:
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
+            lengthTwoLookaheadFound = true;
+        } else if (str_to_parse[i.* + 1] == '>') {
+            i.* += 2; // consume ?>
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
+            lengthTwoLookaheadFound = true;
+        } else { // ? found but no matching flag.
             return core_types.ParsingError.TokenNotFound;
-        },
-        .leaf_atom => |leaf| {
-            switch (leaf.leaf_atom) {
-                .end_anchor, .start_anchor, .word_boundary => {
-                    return core_types.ParsingError.TokenNotFound;
-                },
-                else => {},
-            }
-        },
-        else => {},
+        }
+    } else if (i.* + 2 >= len and str_to_parse[i.*] == '?') { // If there is a flag start but no room for another character, emit an end of string error.
+        return core_types.ParsingError.EndOfString;
     }
+    if (str_to_parse[i.*] == '?') {
+        return core_types.ParsingError.TokenNotFound;
+    }
+    if (!lengthTwoLookaheadFound and !lengthThreeLookaheadFound) { // otherwise, do regular group.
+        const expr = try parseExpr(allocator, str_to_parse, i);
+        result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
+    }
+    if (i.* >= len) {
+        return core_types.ParsingError.EndOfString;
+    }
+    if (str_to_parse[i.*] != ')') {
+        return core_types.ParsingError.TokenNotFound;
+    }
+    return result;
 }
 
-// Scans through the string, grabs numeric component
-fn scanNumeric(str_to_scan: []const u8, i: *usize) !usize {
-    const num_slice_len = i.* + (std.mem.indexOfNone(u8, str_to_scan[i.*..], "0123456789") orelse str_to_scan.len - i.*); // Grab the index where the numeric component of string ends.
-    const number = try std.fmt.parseUnsigned(usize, str_to_scan[i.*..num_slice_len], 10); // Slice through numeric component and grab int value.
-    i.* = num_slice_len;
-    return number;
+fn parseCharCLass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
+    if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
+    var result_list = try std.ArrayList(ast_types.AtomNode).initCapacity(allocator, 1);
+    defer {
+        result_list.deinit(allocator);
+    }
+    var negated: bool = false;
+    if (str_to_parse[i.*] == '^') { // handle ^ negation edge case for first part char class.
+        negated = true;
+        i.* += 1;
+        if (i.* >= str_to_parse.len) {
+            return core_types.ParsingError.EndOfString;
+        }
+    }
+    var item: ast_types.AtomNode = undefined;
+    while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
+        item = try scanClassAtom(str_to_parse, i); // Parse the first item in the class.
+        try result_list.append(allocator, item);
+        i.* += 1;
+    }
+    if (i.* >= str_to_parse.len) {
+        return core_types.ParsingError.EndOfString;
+    }
+    const list_slice = try result_list.toOwnedSlice(allocator);
+    const result = try allocator.create(ast_types.ASTNode);
+    result.* = .{ .class = .{ .items = list_slice, .negated = negated } };
+    return result;
 }
 
-fn checkQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
+fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     var count_min: usize = undefined;
     var count_max: repetition_types.RepetitionBoundType = undefined;
     if (i.* >= str_to_parse.len) {
@@ -413,18 +332,144 @@ fn checkQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
     return atom_parent;
 }
 
-fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!ast_types.LeafAtomNode { // For use in character class compilation to tokenize with '-' syntax awareness.
+fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_set: u8, metacharacter: bool) anyerror!*ast_types.ASTNode {
+    var atom_result: ast_types.AtomNode = undefined;
+    switch (metacharacter) {
+        true => {
+            switch (char_to_set) {
+                'd' => {
+                    atom_result = .{ .atom = .digit, .inverted = false };
+                },
+                'D' => {
+                    atom_result = .{ .atom = .digit, .inverted = true };
+                },
+                's' => {
+                    atom_result = .{ .atom = .whitespace, .inverted = false };
+                },
+                'S' => {
+                    atom_result = .{ .atom = .whitespace, .inverted = true };
+                },
+                'w' => {
+                    atom_result = .{ .atom = .word, .inverted = false };
+                },
+                'W' => {
+                    atom_result = .{ .atom = .word, .inverted = true };
+                },
+                'b' => {
+                    atom_result = .{ .atom = .word_boundary, .inverted = false };
+                },
+                'B' => {
+                    atom_result = .{ .atom = .word_boundary, .inverted = true };
+                },
+                '^' => {
+                    atom_result = .{ .atom = .start_anchor, .inverted = false };
+                },
+                '$' => {
+                    atom_result = .{ .atom = .end_anchor, .inverted = false };
+                },
+                '.' => {
+                    atom_result = .{ .atom = .any, .inverted = false };
+                },
+                '0'...'9' => { // Parse a backreference.
+                    var z = i.*;
+                    const num = try scanNumeric(str_to_parse, &z);
+                    if (z > i.*) {
+                        i.* = z - 1; // This method can scan backreferences, but it does not parse an entire unit.
+                        // The parser expects a single consumable character after this function is called.
+                    } else {
+                        return core_types.ParsingError.TokenNotFound;
+                    }
+                    atom_result = .{ .atom = .{ .backref = num }, .inverted = false };
+                },
+                '(', ')', '[', ']', '{', '}', '|' => {
+                    return core_types.ParsingError.TokenNotFound;
+                },
+                else => {
+                    atom_result = .{ .atom = .{ .generic = char_to_set }, .inverted = false };
+                },
+            }
+        },
+        false => {
+            atom_result = .{ .atom = .{ .generic = char_to_set }, .inverted = false };
+        },
+    }
+    const result = try allocator.create(ast_types.ASTNode);
+    result.* = .{ .atom = atom_result };
+    return result;
+}
+
+fn isDefaultMetacharacter(character: u8) bool {
+    switch (character) {
+        '$', '^', '.', '[', ']', '(', ')', '{', '}', '*', '+', '|', '?' => {
+            return true;
+        },
+        else => {
+            return false;
+        },
+    }
+}
+
+fn isEscapedMetacharacter(character: u8) bool {
+    switch (character) {
+        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', '0'...'9' => {
+            return true;
+        },
+        else => {
+            return false;
+        },
+    }
+}
+
+fn assertRepetitionAllowance(atom: *ast_types.ASTNode) !void {
+    switch (atom.*) { // Validate that node is allowed to be repeated.
+        .group => |grp| {
+            switch (grp.type) {
+                .non_capturing => {},
+                else => {},
+            }
+        },
+        .epsilon,
+        .repetition,
+        => {
+            return core_types.ParsingError.TokenNotFound;
+        },
+        .atom => |leaf| {
+            switch (leaf.atom) {
+                .end_anchor, .start_anchor, .word_boundary => {
+                    return core_types.ParsingError.TokenNotFound;
+                },
+                else => {},
+            }
+        },
+        else => {},
+    }
+}
+
+// Scanning functions will look through the target string and increment the string pointer; they do not consider parsing-level grammar and therefore do not heap allocate any AST nodes.
+// These functions only consider atom nodes, if any.
+
+/// Scans through the string and grabs a numeric component as a size value.
+fn scanNumeric(str_to_scan: []const u8, i: *usize) !usize {
+    const num_slice_len = i.* + (std.mem.indexOfNone(u8, str_to_scan[i.*..], "0123456789") orelse str_to_scan.len - i.*); // Grab the index where the numeric component of string ends.
+    const number = try std.fmt.parseUnsigned(usize, str_to_scan[i.*..num_slice_len], 10); // Slice through numeric component and grab int value.
+    i.* = num_slice_len;
+    return number;
+}
+
+/// Tokenizes character classes with '-' syntax awareness.
+fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
     var escaped: bool = false;
-    if (str_to_parse[i.*] == '\\') {
+    const len: usize = str_to_scan.len;
+    if (str_to_scan[i.*] == '\\') {
         i.* += 1; // Consume backslash.
-        if (i.* >= str_to_parse.len) {
+        if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
         }
         escaped = true;
     }
-    var char_to_set: u8 = str_to_parse[i.*];
+    var char_to_set: u8 = str_to_scan[i.*];
     if (escaped) {
-        switch (str_to_parse[i.*]) {
+        switch (str_to_scan[i.*]) {
             'n' => {
                 char_to_set = '\n';
             },
@@ -436,40 +481,40 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!ast_typ
             },
             ']' => {}, // Here for explicitness; already handled in the char_to_set assignment line.
             'd' => {
-                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
                     return core_types.ParsingError.TokenNotFound;
                 }
-                return .{ .leaf_atom = .digit, .inverted = false };
+                return .{ .atom = .digit, .inverted = false };
             },
             'D' => {
-                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
                     return core_types.ParsingError.TokenNotFound;
                 }
-                return .{ .leaf_atom = .digit, .inverted = true };
+                return .{ .atom = .digit, .inverted = true };
             },
             'w' => {
-                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
                     return core_types.ParsingError.TokenNotFound;
                 }
-                return .{ .leaf_atom = .word, .inverted = false };
+                return .{ .atom = .word, .inverted = false };
             },
             'W' => {
-                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
                     return core_types.ParsingError.TokenNotFound;
                 }
-                return .{ .leaf_atom = .word, .inverted = true };
+                return .{ .atom = .word, .inverted = true };
             },
             's' => {
-                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
                     return core_types.ParsingError.TokenNotFound;
                 }
-                return .{ .leaf_atom = .whitespace, .inverted = false };
+                return .{ .atom = .whitespace, .inverted = false };
             },
             'S' => {
-                if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') {
+                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
                     return core_types.ParsingError.TokenNotFound;
                 }
-                return .{ .leaf_atom = .whitespace, .inverted = true };
+                return .{ .atom = .whitespace, .inverted = true };
             },
             'b', 'B' => { // Not allowed at all in char classes.
                 return core_types.ParsingError.TokenNotFound;
@@ -478,24 +523,24 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!ast_typ
         }
     }
     escaped = false;
-    if (i.* < str_to_parse.len - 1 and str_to_parse[i.* + 1] == '-') { // Range syntax.
-        if (i.* < str_to_parse.len - 2 and str_to_parse[i.* + 2] == ']') { // Return so that '-' is interpreted as a character at the end.
-            return .{ .leaf_atom = .{ .generic = char_to_set }, .inverted = false };
+    if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') { // Range syntax.
+        if (i.* + 2 < len and str_to_scan[i.* + 2] == ']') { // Return so that '-' is interpreted as a character at the end.
+            return .{ .atom = .{ .generic = char_to_set }, .inverted = false };
         }
         i.* += 2; // Skip past current item and -.
-        if (i.* >= str_to_parse.len) {
+        if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
         }
-        if (str_to_parse[i.*] == '\\') {
+        if (str_to_scan[i.*] == '\\') {
             i.* += 1; // Consume backslash.
-            if (i.* >= str_to_parse.len) {
+            if (i.* >= len) {
                 return core_types.ParsingError.EndOfString;
             }
             escaped = true;
         }
-        var char_to_set2: u8 = str_to_parse[i.*]; // Grab character after -.
+        var char_to_set2: u8 = str_to_scan[i.*]; // Grab character after -.
         if (escaped) {
-            switch (str_to_parse[i.*]) {
+            switch (str_to_scan[i.*]) {
                 'n' => {
                     char_to_set2 = '\n';
                 },
@@ -522,63 +567,7 @@ fn fetchCharOrRangeInClass(str_to_parse: []const u8, i: *usize) anyerror!ast_typ
         if (char_to_set >= char_to_set2) {
             return core_types.ParsingError.InvalidRange;
         }
-        return .{ .leaf_atom = .{ .range = .{ .character_min = char_to_set, .character_max = char_to_set2 } }, .inverted = false }; // If range is found, make range node.
+        return .{ .atom = .{ .range = .{ .character_min = char_to_set, .character_max = char_to_set2 } }, .inverted = false }; // If range is found, make range node.
     }
-    return .{ .leaf_atom = .{ .generic = char_to_set }, .inverted = false };
-}
-
-fn printLeafAtom(out_interface: anytype, leaf: ast_types.LeafAtomNode) !void {
-    switch (leaf.leaf_atom) {
-        .generic => |gen_leaf| {
-            var buf: [2]u8 = undefined;
-            if (gen_leaf == '\n') {
-                buf[0] = '\\';
-                buf[1] = 'n';
-            } else if (gen_leaf == '\t') {
-                buf[0] = '\\';
-                buf[1] = 't';
-            } else if (gen_leaf == '\r') {
-                buf[0] = '\\';
-                buf[1] = 'r';
-            } else {
-                buf[0] = gen_leaf;
-                buf[1] = 0;
-            }
-            try out_interface.print("LITERAL(char = {s})\n", .{buf});
-        },
-        .range => |range| {
-            var buf: [2]u8 = undefined;
-            var buf2: [2]u8 = undefined;
-            if (range.character_min == '\n') {
-                buf[0] = '\\';
-                buf[1] = 'n';
-            } else if (range.character_min == '\t') {
-                buf[0] = '\\';
-                buf[1] = 't';
-            } else if (range.character_min == '\r') {
-                buf[0] = '\\';
-                buf[1] = 'r';
-            } else {
-                buf[0] = range.character_min;
-                buf[1] = 0;
-            }
-            if (range.character_max == '\n') {
-                buf2[0] = '\\';
-                buf2[1] = 'n';
-            } else if (range.character_max == '\t') {
-                buf2[0] = '\\';
-                buf2[1] = 't';
-            } else if (range.character_max == '\r') {
-                buf2[0] = '\\';
-                buf2[1] = 'r';
-            } else {
-                buf2[0] = range.character_max;
-                buf2[1] = 0;
-            }
-            try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
-        },
-        else => {
-            try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{ @tagName(leaf.leaf_atom), leaf.inverted });
-        },
-    }
+    return .{ .atom = .{ .generic = char_to_set }, .inverted = false };
 }

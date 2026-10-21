@@ -54,7 +54,7 @@ fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usiz
         .repetition => |rep| {
             try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, rep.child);
         },
-        .class, .failed_parse, .epsilon, .leaf_atom => {},
+        .class, .failed_parse, .epsilon, .atom => {},
         // Does not use an else clause so the compiler errors when other cases that might need to be handled aren't.
     }
 }
@@ -206,8 +206,8 @@ pub fn matchRequirementRange(ast: *const ast_types.ASTNode) core_types.AnalysisE
         .class => {
             return repetition_types.RepetitionRangeType{ .min = 1, .max = .{ .bounded = 1 } };
         },
-        .leaf_atom => |leaf| {
-            switch (leaf.leaf_atom) {
+        .atom => |leaf| {
+            switch (leaf.atom) {
                 .word_boundary, .start_anchor, .end_anchor => {
                     return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
                 },

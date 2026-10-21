@@ -1,6 +1,5 @@
 const std = @import("std");
 const core_types = @import("core_types.zig");
-const core_util = @import("core_util.zig");
 const ast_types = @import("ast_types.zig");
 const instruction_types = @import("instruction_types.zig");
 
@@ -66,10 +65,10 @@ fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(instruction_
     return index_ptr.* - 1;
 }
 
-fn leafToLiteralInstruction(leaf: ast_types.LeafAtomNode) !instruction_types.LiteralInstruction {
+fn ToLiteralInstruction(leaf: ast_types.AtomNode) !instruction_types.LiteralInstruction {
     var ret: instruction_types.LiteralInstruction = undefined;
     ret.inverted = leaf.inverted;
-    switch (leaf.leaf_atom) {
+    switch (leaf.atom) {
         .any => {
             ret.data = .any;
         },
@@ -106,13 +105,13 @@ fn leafToLiteralInstruction(leaf: ast_types.LeafAtomNode) !instruction_types.Lit
 
 fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), ast: *ast_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
     switch (ast.*) {
-        .leaf_atom => |leaf| {
-            switch (leaf.leaf_atom) {
+        .atom => |leaf| {
+            switch (leaf.atom) {
                 .backref => |id| { // Backreferences are only handled as leaf nodes because of where they are handled in parsing; they do not correspond to a literal in bytecode.
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id }, instruction_ptr);
                 },
                 else => {
-                    _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try leafToLiteralInstruction(leaf) }, instruction_ptr);
+                    _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try ToLiteralInstruction(leaf) }, instruction_ptr);
                 },
             }
         },
@@ -214,7 +213,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
             var accepted_chars: u256 = 0;
             for (0..class_item.items.len) |i| { // Encode each item into the bitmask.
                 var mask_change_val: u256 = undefined;
-                switch (class_item.items[i].leaf_atom) {
+                switch (class_item.items[i].atom) {
                     .generic => |gen| {
                         mask_change_val = @as(u256, 1) << gen;
                     },

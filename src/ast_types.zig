@@ -64,8 +64,8 @@ pub const GroupNode = struct {
     }
 };
 
-pub const LeafAtomNode = struct {
-    leaf_atom: union(enum) {
+pub const AtomNode = struct {
+    atom: union(enum) {
         generic: u8,
         backref: usize, // Refers to a group.
         digit: void,
@@ -81,26 +81,26 @@ pub const LeafAtomNode = struct {
         },
     },
     inverted: bool,
-    pub fn equals(self: *const LeafAtomNode, other: LeafAtomNode) bool {
-        if (std.meta.activeTag(self.leaf_atom) != std.meta.activeTag(other.leaf_atom)) {
+    pub fn equals(self: *const AtomNode, other: AtomNode) bool {
+        if (std.meta.activeTag(self.atom) != std.meta.activeTag(other.atom)) {
             return false;
         }
-        switch (self.leaf_atom) {
+        switch (self.atom) {
             .generic => |chr| {
-                if (chr != other.leaf_atom.generic) {
+                if (chr != other.atom.generic) {
                     return false;
                 }
             },
             .range => |range| {
-                if (range.character_min != other.leaf_atom.range.character_min) {
+                if (range.character_min != other.atom.range.character_min) {
                     return false;
                 }
-                if (range.character_max != other.leaf_atom.range.character_max) {
+                if (range.character_max != other.atom.range.character_max) {
                     return false;
                 }
             },
             .backref => |backref| {
-                if (backref != other.leaf_atom.backref) {
+                if (backref != other.atom.backref) {
                     return false;
                 }
             },
@@ -141,7 +141,7 @@ pub const ConcatenationNode = struct {
 };
 
 pub const ClassNode = struct { // Character class.
-    items: []LeafAtomNode,
+    items: []AtomNode,
     negated: bool,
     pub fn equals(self: *const ClassNode, other: ClassNode) bool {
         if (self.negated != other.negated) {
@@ -160,7 +160,7 @@ pub const ClassNode = struct { // Character class.
 };
 
 pub const ASTNode = union(enum) {
-    leaf_atom: LeafAtomNode,
+    atom: AtomNode,
     concatenation: ConcatenationNode,
     alternation: AlternationNode,
     group: GroupNode,
@@ -179,8 +179,8 @@ pub const ASTNode = union(enum) {
             return false;
         }
         switch (self.*) {
-            .leaf_atom => {
-                if (!self.leaf_atom.equals(other_unwrapped_pointer.leaf_atom)) {
+            .atom => {
+                if (!self.atom.equals(other_unwrapped_pointer.atom)) {
                     return false;
                 }
             },
@@ -216,7 +216,7 @@ pub const ASTNode = union(enum) {
     }
     pub fn deinit(self: *@This(), allocator: anytype) void {
         switch (self.*) {
-            .leaf_atom => {
+            .atom => {
                 allocator.destroy(self);
             },
             .alternation => |alt| {
