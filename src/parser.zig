@@ -33,11 +33,13 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
         }
     }
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString; // Error out after deferring.
+    var currentTerm: *ast_types.ASTNode = undefined;
     if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
-        try result_list.append(allocator, &EPSILON_UNIT);
+        currentTerm = &EPSILON_UNIT;
     } else { // If not an epsilon, just parse the first alternation as a regular term.
-        try result_list.append(allocator, try parseTerm(allocator, str_to_parse, i));
+        currentTerm = try parseTerm(allocator, str_to_parse, i);
     }
+    try result_list.append(allocator, currentTerm);
     while (i.* < str_to_parse.len and str_to_parse[i.*] == '|') { // Parse through pipes as arguments.
         i.* += 1;
         if (i.* >= str_to_parse.len) {
@@ -51,7 +53,7 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
     result.* = .{ .alternation = .{ .parts = list_slice } }; // Start parsing alternations first, and assume 2 alternations minimum.
-    if (list_slice.len == 1) {
+    if (list_slice.len == 1) { // Optimize away an alternation of only 1 element.
         allocator.destroy(result);
         result = list_slice[0];
         allocator.free(list_slice);
@@ -73,13 +75,15 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
             item.deinit(allocator);
         }
     }
-    try result_list.append(allocator, try parseFactor(allocator, str_to_parse, i));
+    var currentFactor = try parseFactor(allocator, str_to_parse, i);
+    try result_list.append(allocator, currentFactor);
     while (i.* < str_to_parse.len and str_to_parse[i.*] != '|' and str_to_parse[i.*] != ')') { // If character pointed to is handled by expr or factor, break.
-        try result_list.append(allocator, try parseFactor(allocator, str_to_parse, i));
+        currentFactor = try parseFactor(allocator, str_to_parse, i);
+        try result_list.append(allocator, currentFactor);
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
     result.* = .{ .concatenation = .{ .parts = list_slice } };
-    if (list_slice.len == 1) {
+    if (list_slice.len == 1) { // Destroy a concatenation of only 1 element; node is meant to sequentially link 2 or more elements together.
         allocator.destroy(result);
         result = list_slice[0];
         allocator.free(list_slice);
@@ -87,16 +91,13 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
-fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
+fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!ast_types.ASTNode {
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
-    const result = try allocator.create(ast_types.ASTNode);
-    result.* = .failed_parse;
-    errdefer result.deinit(allocator);
     var result_list = try std.ArrayList(ast_types.LeafAtomNode).initCapacity(allocator, 1);
-    var negated: bool = false;
     defer {
         result_list.deinit(allocator);
     }
+    var negated: bool = false;
     if (str_to_parse[i.*] == '^') { // handle ^ negation edge case for first part char class.
         negated = true;
         i.* += 1;
@@ -114,8 +115,7 @@ fn parseCharClass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         return core_types.ParsingError.EndOfString;
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
-    result.* = .{ .class = .{ .items = list_slice, .negated = negated } };
-    return result;
+    return .{ .class = .{ .items = list_slice, .negated = negated } };
 }
 
 fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
@@ -125,7 +125,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
         result.* = .failed_parse;
         errdefer result.deinit(allocator);
-        if (i.* < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // Check all possible lookahead flags if safe to do so.
+        if (i.* + 2 < str_to_parse.len and str_to_parse[i.*] == '?') {
             if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
                 i.* += 3; // consume ?<=
                 result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{
@@ -154,22 +154,8 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
                 const name: []const u8 = str_to_parse[i.* + 2 .. j];
                 i.* = j + 1;
                 result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
-            } else if (str_to_parse[i.* + 1] == '=') {
-                i.* += 2; // consume ?=
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
-            } else if (str_to_parse[i.* + 1] == '!') {
-                i.* += 2; // consume ?!
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
-            } else if (str_to_parse[i.* + 1] == ':') {
-                i.* += 2; // consume ?:
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
-            } else if (str_to_parse[i.* + 1] == '>') {
-                i.* += 2; // consume ?>
-                result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
-            } else { // ? found but no matching flag.
-                return core_types.ParsingError.TokenNotFound;
             }
-        } else if (i.* < str_to_parse.len - 1 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
+        } else if (i.* + 1 < str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // Check all possible lookahead flags if safe to do so.
             if (str_to_parse[i.* + 1] == '=') {
                 i.* += 2; // consume ?=
                 result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
@@ -185,11 +171,12 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             } else { // ? found but no matching flag.
                 return core_types.ParsingError.TokenNotFound;
             }
+        } else if (i.* >= str_to_parse.len - 2 and str_to_parse[i.*] == '?') { // if only safe to check length 2 quantifiers, do that instead.
+            return core_types.ParsingError.TokenNotFound;
         } else { // otherwise, do regular group.
             result.* = .{ .group = .{ .expr = try parseExpr(allocator, str_to_parse, i), .name = null, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
         }
         if (i.* >= str_to_parse.len or str_to_parse[i.*] != ')') {
-            result.group.expr.deinit(allocator);
             return core_types.ParsingError.TokenNotFound;
         }
         i.* += 1; // consume ')'
@@ -199,13 +186,13 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             return result;
         }
     }
-    var atom = try allocator.create(ast_types.ASTNode);
+    const atom = try allocator.create(ast_types.ASTNode);
+    errdefer allocator.destroy(atom);
     var metacharacter: bool = undefined;
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
         i.* += 1; // Consume backslash.
         if (i.* >= str_to_parse.len) {
-            allocator.destroy(atom);
             return core_types.ParsingError.EndOfString;
         }
         escaped = true;
@@ -229,23 +216,14 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         }
     }
     if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
-        allocator.destroy(atom);
         i.* += 1; // Consume the '['.
-        atom = try parseCharClass(allocator, str_to_parse, i);
+        atom.* = try parseCharClass(allocator, str_to_parse, i);
     } else {
-        atom.* = .{
-            .leaf_atom = fetchCharLeafAtom(char_to_set, metacharacter, str_to_parse, i) catch |err| {
-                allocator.destroy(atom);
-                return err; // Manually catch/free with erroring to prevent double-free.
-            },
-        };
+        atom.* = .{ .leaf_atom = try fetchCharLeafAtom(char_to_set, metacharacter, str_to_parse, i) };
     }
-    i.* += 1; // Consume most recently used character, either the current token or the end of char class. If this leaf is a backreference, that would be the last digit of the ID.
+    i.* += 1; // Consume most recently used character, either the end of the LeafAtom or the end of char class. If this leaf is a backreference, that would be the last digit of the ID or name delimiter >.
     if (i.* >= str_to_parse.len) return atom; // Only if at end of string, otherwise check for repetition.
-    return checkQuantifiers(atom, allocator, str_to_parse, i) catch |err| {
-        allocator.destroy(atom);
-        return err;
-    };
+    return try checkQuantifiers(atom, allocator, str_to_parse, i);
 }
 
 fn fetchCharLeafAtom(char_to_set: u8, metacharacter: bool, str_to_parse: []const u8, i: *usize) !ast_types.LeafAtomNode {
