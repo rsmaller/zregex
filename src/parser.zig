@@ -169,21 +169,8 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             }, .negated = true } };
             lengthThreeLookaheadFound = true;
         } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?<")) {
-            var j: usize = i.* + 2;
-            while (j < len and str_to_parse[j] != '>') {
-                switch (str_to_parse[j]) {
-                    'a'...'z', 'A'...'Z', '0'...'9' => {},
-                    else => {
-                        return core_types.ParsingError.InvalidGroupName;
-                    },
-                }
-                j += 1;
-            }
-            if (j >= len) {
-                return core_types.ParsingError.EndOfString;
-            }
-            const name: []const u8 = str_to_parse[i.* + 2 .. j];
-            i.* = j + 1;
+            i.* += 1; // Consume '?'.
+            const name = try scanGroupName(str_to_parse, i);
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
             lengthThreeLookaheadFound = true;
@@ -454,6 +441,34 @@ fn scanNumeric(str_to_scan: []const u8, i: *usize) !usize {
     const number = try std.fmt.parseUnsigned(usize, str_to_scan[i.*..num_slice_len], 10); // Slice through numeric component and grab int value.
     i.* = num_slice_len;
     return number;
+}
+
+///
+fn scanGroupName(str_to_scan: []const u8, i: *usize) ![]const u8 {
+    const len = str_to_scan.len;
+    if (str_to_scan[i.*] != '<') {
+        return core_types.ParsingError.InvalidGroupName;
+    }
+    const start = i.* + 1;
+    var end: usize = start; // Consume '<'.
+    while (end < len and str_to_scan[end] != '>') {
+        switch (str_to_scan[end]) {
+            'a'...'z', 'A'...'Z', '0'...'9' => {},
+            else => {
+                return core_types.ParsingError.InvalidGroupName;
+            },
+        }
+        end += 1;
+    }
+    if (end >= len) {
+        return core_types.ParsingError.EndOfString;
+    }
+    if (str_to_scan[end] != '>') {
+        return core_types.ParsingError.InvalidGroupName;
+    }
+    const name: []const u8 = str_to_scan[start .. end];
+    i.* = end + 1; // Consume '>'.
+    return name;
 }
 
 /// Tokenizes character classes with '-' syntax awareness.
