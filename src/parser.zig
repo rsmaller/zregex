@@ -154,21 +154,21 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     errdefer result.deinit(allocator);
     var lengthThreeLookaheadFound = false;
     if (i.* + 2 < len and str_to_parse[i.*] == '?') {
-        if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '=') {
+        if (std.mem.eql(u8, str_to_parse[i.*..i.*+3], "?<=")) {
             i.* += 3; // consume ?<=
             const expr = try parseExpr(allocator, str_to_parse, i); // Changed to initialize in local variable to prevent defer free segfaulting at 0x0. Possible compiler bug?
             result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{
                 .non_capturing = .{ .lookbehind = 0 },
             }, .negated = false } };
             lengthThreeLookaheadFound = true;
-        } else if (str_to_parse[i.* + 1] == '<' and str_to_parse[i.* + 2] == '!') {
+        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+3], "?<!")) {
             i.* += 3; // consume ?<!
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{
                 .non_capturing = .{ .lookbehind = 0 },
             }, .negated = true } };
             lengthThreeLookaheadFound = true;
-        } else if (str_to_parse[i.* + 1] == '<') {
+        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?<")) {
             var j: usize = i.* + 2;
             while (j < len and str_to_parse[j] != '>') {
                 switch (str_to_parse[j]) {
@@ -191,22 +191,22 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     }
     var lengthTwoLookaheadFound = false;
     if (!lengthThreeLookaheadFound and i.* + 1 < len and str_to_parse[i.*] == '?') { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
-        if (str_to_parse[i.* + 1] == '=') {
+        if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?=")) {
             i.* += 2; // consume ?=
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
             lengthTwoLookaheadFound = true;
-        } else if (str_to_parse[i.* + 1] == '!') {
+        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?!")) {
             i.* += 2; // consume ?!
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
             lengthTwoLookaheadFound = true;
-        } else if (str_to_parse[i.* + 1] == ':') {
+        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?:")) {
             i.* += 2; // consume ?:
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
             lengthTwoLookaheadFound = true;
-        } else if (str_to_parse[i.* + 1] == '>') {
+        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?>")) {
             i.* += 2; // consume ?>
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
