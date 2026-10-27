@@ -8,6 +8,8 @@ typedef struct Match { // Expose abi.zig's Match struct type.
     size_t group_count;
 } Match;
 
+typedef size_t (*CallbackFunc)(const void *, size_t, size_t, FILE *);
+
 #define ZIG_NON_PTR_OPTIONAL_DECL(T) typedef struct ZOptional_##T {\
     T value;\
     bool present;\
@@ -30,7 +32,7 @@ void zregex_destroy_pattern(void *pattern_handle);
 void zregex_destroy_match(Match *match_handle);
 
 void zregex_init_zig(void *io_handle); // Takes in the Zig IO handle.
-void zregex_init_c(FILE *io_handle); // Takes in a FILE ptr to stdout.
+void zregex_init_c(FILE *io_handle, CallbackFunc callback_fn); // Takes in a FILE ptr to stdout.
 
 void zregex_print_bytecode(void *pattern_handle);
 void zregex_print_ast(void *pattern_handle, ASTPrintOptions options);

@@ -39,12 +39,12 @@ pub fn printBytecode(out_interface: anytype, pattern: core_types.Pattern) void {
             .repeat_start => |rep| {
                 switch (rep.max) {
                     .bounded => {
-                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp, @tagName(rep.mode) }) catch |err| {
+                        out_interface.print("REP_START(min={d}, max={d}, esc={d}, {s})\n", .{ rep.min, rep.max.bounded, rep.escape_jmp_index, @tagName(rep.mode) }) catch |err| {
                             std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
                         };
                     },
                     .unbounded => {
-                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp, @tagName(rep.mode) }) catch |err| {
+                        out_interface.print("REP_START(min={d}, max=inf, esc={d}, {s})\n", .{ rep.min, rep.escape_jmp_index, @tagName(rep.mode) }) catch |err| {
                             std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
                         };
                     },
@@ -125,7 +125,7 @@ pub fn printBytecode(out_interface: anytype, pattern: core_types.Pattern) void {
                 };
             },
             .neg_lookbehind_start => |neg_lookbehind| {
-                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp }) catch |err| {
+                out_interface.print("NEG_LOOKBEHIND_START(len={d}, jmp={d})\n", .{ neg_lookbehind.len, neg_lookbehind.jmp_index }) catch |err| {
                     std.debug.print("Error encountered in zregex: {s}\n", .{@errorName(err)});
                 };
             },

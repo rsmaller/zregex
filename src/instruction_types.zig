@@ -30,7 +30,7 @@ pub const Instruction = union(enum) {
         min: usize,
         max: repetition_types.RepetitionBoundType, // Reused repetition bound
         mode: repetition_types.RepeaterType,
-        escape_jmp: usize,
+        escape_jmp_index: usize,
     },
     repeat_end: usize,
     jmp: usize,
@@ -48,7 +48,7 @@ pub const Instruction = union(enum) {
     neg_lookahead_end: void,
     neg_lookbehind_start: struct {
         len: usize,
-        jmp: usize,
+        jmp_index: usize,
     },
     neg_lookbehind_end: void,
     backref: usize,

@@ -99,14 +99,8 @@ fn genericASTAnalyze(ast: *ast_types.ASTNode, id: *usize) !void {
 
 fn assertRepetitionAllowance(atom: *ast_types.ASTNode) !void {
     switch (atom.*) { // Validate that node is allowed to be repeated.
-        .group => |grp| {
-            switch (grp.type) {
-                .non_capturing => {},
-                else => {},
-            }
-        },
-        .epsilon,
-        .repetition => {
+        .group => {},
+        .repetition, .epsilon => { // If *somehow* either of these happen, throw an error.
             return core_types.AnalysisError.InvalidRepetition;
         },
         .atom => |leaf| {

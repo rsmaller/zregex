@@ -6,7 +6,7 @@ int main(int argc, char **argv) {
         printf("Please provide a string and pattern!\n");
         return -1;
     }
-    zregex_init_c(stdout);
+    zregex_init_c(stdout, fwrite);
     char *string_to_match = argv[1]; //"john.doe@gmail.com";
     char *pattern = argv[2];
     printf("String: %s, Pattern: %s\n", string_to_match, pattern); // So string and pattern print before errors.

@@ -1,6 +1,9 @@
+// Contains other VM execution related types that are not directly baked into the VM's execution context.
 const std = @import("std");
 const core_types = @import("core_types.zig");
 const repetition_types = @import("repetition_types.zig");
+
+pub const VMExecutionContext = @import("vm_execution_context.zig"); // Execution context file exposed as a type.
 
 pub const IntermediateMatch = struct { // Intermediary representation of matches before they are returned to the user.
     groups: []const ?IntermediateMatchGroup,
@@ -18,7 +21,7 @@ pub const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat byt
     previous_rep_ptr: ?usize,
     previous_str_ptr: usize,
     current_count: usize,
-    escape_jmp: usize,
+    escape_jmp_index: usize,
 };
 
 pub const ChoicePointStackFrame = struct {
@@ -37,7 +40,7 @@ pub const GroupStackFrame = struct {
 pub const LookaheadStackFrame = struct {
     saved_str_ptr: usize,
     negative: bool,
-    jmp: ?usize,
+    jmp_index: ?usize,
 };
 
 pub const StackFrame = union(enum) {
