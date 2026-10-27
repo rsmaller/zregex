@@ -46,8 +46,6 @@ pub const Match = extern struct { // CABI-compatible reconstruction of zregex ma
     group_count: usize,
 };
 
-pub export fn zregex_dummy() callconv(.c) void {}
-
 pub export fn zregex_init_zig(io_handle: *std.Io.Writer) callconv(.c) void { // Hooks into IO for zig files; C IO handle to be determined.
     io_ref = .{.zig = .{ .io = io_handle } };
 }

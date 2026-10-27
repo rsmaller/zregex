@@ -23,8 +23,6 @@ typedef struct ASTPrintOptions { // Expose root.zig's ASTPrintOptions struct typ
     bool show_match_width;
 } ASTPrintOptions;
 
-void zregex_dummy(void);
-
 void *zregex_compile(const char *str);
 Match *zregex_match(void *pattern_handle, const char *string);
 

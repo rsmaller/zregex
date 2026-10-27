@@ -9,14 +9,14 @@ endif
 
 default: all
 
-all: zig-lib c-example
+all: zig-lib c
 
 zig-lib:
 	zig build
 
-c-example: ./c-example/c-example.c zig-lib
+c: ./c/c-example.c zig-lib
 	mkdir -p c-out
 	cp ./zig-out/bin/* ./c-out
 	cp ./zig-out/lib/* ./c-out
-	$(CC) ./c-example/c-example.c $(FLAGS) $(IFLAGS) $(LFLAGS) -lzregex -o c-out/c-example
+	$(CC) ./c/c-example.c $(FLAGS) $(IFLAGS) $(LFLAGS) -lzregex -o c-out/c-example
 	
