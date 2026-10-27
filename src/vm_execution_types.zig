@@ -16,6 +16,7 @@ pub const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat byt
     max: repetition_types.RepetitionBoundType,
     mode: repetition_types.RepeaterType,
     previous_rep_ptr: ?usize,
+    previous_str_ptr: usize,
     current_count: usize,
     escape_jmp: usize,
 };

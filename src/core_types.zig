@@ -88,4 +88,5 @@ pub const VMError = error{
 
 pub const AnalysisError = error{
     UnknownLength,
+    InvalidRepetition,
 };

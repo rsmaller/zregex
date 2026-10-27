@@ -21,6 +21,7 @@ const VMExecutionContext = struct {
     stack: MainStack,
     ip: usize,
     jmp_queued: bool,
+    repetition_consumed_input: bool, // Used to stop infinite looping of repetition.
     str_ptr: usize,
     current_group_ptr: ?usize, // the index that points to the current group frame.
     current_rep_ptr: ?usize,
@@ -30,6 +31,7 @@ const VMExecutionContext = struct {
             .stack = try MainStack.init(allocator),
             .ip = 0,
             .jmp_queued = false,
+            .repetition_consumed_input = true,
             .current_rep_ptr = null,
             .str_ptr = start_ptr,
             .current_group_ptr = null,
@@ -289,6 +291,7 @@ fn literal_match(literal: anytype, string: []const u8, index: usize) Conditional
     return .{ .matching = matching, .consuming = consuming };
 }
 
+// Sets the VM to the next repetition iteration and returns true if the given repetition has incremented the str pointer successfully.
 fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, jump_index: usize) !void {
     var current_frame_ref: *RepeatStackFrame = undefined;
     if (try main_context.currentRepFrameReference()) |frame_ref| {
@@ -303,9 +306,10 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
     const current_count = try main_context.currentCount();
     if (current_count < min) {
         main_context.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
-    } else if (repetition_count_cmp(current_count, max, .GE)) {
+    } else if (repetition_count_cmp(current_count, max, .GE) or !main_context.repetition_consumed_input) { // Exit if within range and repetition did not consume anything, or if past max.
         main_context.current_rep_ptr = current_frame_ref.previous_rep_ptr; // set to previous rep frame when exiting.
         main_context.jmp(main_context.ip + 1);
+        main_context.repetition_consumed_input = true; // Set back to true when exiting to ensure future repetitions do not exit early.
     } else {
         switch (mode) {
             .greedy => {
@@ -321,6 +325,7 @@ fn repeat_next_iteration(allocator: anytype, main_context: *VMExecutionContext, 
             },
         }
     }
+    main_context.repetition_consumed_input = main_context.str_ptr > current_frame_ref.previous_str_ptr;
 }
 
 pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, bytecode: []instruction_types.Instruction, string: []const u8) !?vm_execution_types.IntermediateMatch {
@@ -336,7 +341,7 @@ pub fn internal_match(allocator: anytype, main_context: *VMExecutionContext, byt
                 main_context.ip = split_instr.left;
             },
             .repeat_start => |rep| {
-                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .current_count = 0, .escape_jmp = rep.escape_jmp } });
+                try main_context.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = main_context.current_rep_ptr, .previous_str_ptr =  main_context.str_ptr, .current_count = 0, .escape_jmp = rep.escape_jmp } });
                 main_context.current_rep_ptr = main_context.stack.elementCount() - 1;
                 if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
                     try main_context.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp, .backtrack_str_ptr = main_context.str_ptr, .stack_depth = main_context.stack.len(), .previous_count = (try main_context.currentCount()), .previous_rep_ptr = main_context.current_rep_ptr } });

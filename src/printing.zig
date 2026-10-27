@@ -208,9 +208,9 @@ fn printASTRecursive(out_interface: anytype, ast: *ast_types.ASTNode, options: c
                 error.UnknownLength => {
                     try out_interface.print("[Requisite match width is UNKNOWN] -> ", .{});
                 },
-            // else => { // Not currently necessary; left here for when other analysis errors are added to that error union.
-            //     return err;
-            // }
+                else => {
+                    return err;
+                }
             }
         }
     }

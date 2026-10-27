@@ -6,7 +6,7 @@ const type_reflection = @import("type_reflection.zig");
 
 pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedAST {
     var j: usize = 1;
-    try setGroupIDs(ast, &j);
+    try genericASTAnalyze(ast, &j); // Analysis tree-walks split from trimming to simplify debugging; may be merged at a later date.
     try trimAST(allocator, ast);
     var mapping = try mapNames(allocator, ast);
     errdefer {
@@ -59,7 +59,8 @@ fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usiz
     }
 }
 
-fn setGroupIDs(ast: *ast_types.ASTNode, id: *usize) !void {
+/// Recursively walks through the AST tree, sets group IDs using outvalue parameter id, and asserts semantic rules.
+fn genericASTAnalyze(ast: *ast_types.ASTNode, id: *usize) !void {
     switch (ast.*) {
         .group => |grp| { // set ID, increment, and then recurse for group.
             switch (grp.type) {
@@ -71,20 +72,21 @@ fn setGroupIDs(ast: *ast_types.ASTNode, id: *usize) !void {
                     ast.group.id = null;
                 },
             }
-            try setGroupIDs(grp.expr, id);
+            try genericASTAnalyze(grp.expr, id);
         }, // outside of group, just recurse.
         .alternation => |alt| {
             for (alt.parts) |item| {
-                try setGroupIDs(item, id);
+                try genericASTAnalyze(item, id);
             }
         },
         .concatenation => |concat| {
             for (concat.parts) |item| {
-                try setGroupIDs(item, id);
+                try genericASTAnalyze(item, id);
             }
         },
         .repetition => |rep| {
-            try setGroupIDs(rep.child, id);
+            try assertRepetitionAllowance(rep.child);
+            try genericASTAnalyze(rep.child, id);
         },
         .class => {
             return;
@@ -92,6 +94,30 @@ fn setGroupIDs(ast: *ast_types.ASTNode, id: *usize) !void {
         else => {
             return;
         },
+    }
+}
+
+fn assertRepetitionAllowance(atom: *ast_types.ASTNode) !void {
+    switch (atom.*) { // Validate that node is allowed to be repeated.
+        .group => |grp| {
+            switch (grp.type) {
+                .non_capturing => {},
+                else => {},
+            }
+        },
+        .epsilon,
+        .repetition => {
+            return core_types.AnalysisError.InvalidRepetition;
+        },
+        .atom => |leaf| {
+            switch (leaf.atom) {
+                .end_anchor, .start_anchor, .word_boundary => {
+                    return core_types.AnalysisError.InvalidRepetition;
+                },
+                else => {},
+            }
+        },
+        else => {},
     }
 }
 
