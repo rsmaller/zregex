@@ -6,8 +6,8 @@ const VMExecutionContext = vm_execution_types.VMExecutionContext;
 pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
-        if (group) |non_null_grp| {
-            const string_slice = string[non_null_grp.start..non_null_grp.end];
+        if (group.end) |non_null_end| {
+            const string_slice = string[group.start..non_null_end];
             const allocation = try allocator.allocSentinel(u8, string_slice.len, 0);
             @memcpy(allocation[0..string_slice.len], string_slice);
             allocation[string_slice.len] = 0;
@@ -37,9 +37,9 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
                 if (main_context.groups) |_| {
                     return core_types.VMError.InvalidGroupAllocation;
                 } else {
-                    main_context.groups = try allocator.alloc(?vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
+                    main_context.groups = try allocator.alloc(vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
                     if (main_context.groups) |grps| {
-                        @memset(grps, null);
+                        @memset(grps, .{.start = 0, .end = null});
                     }
                 }
             },

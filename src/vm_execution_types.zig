@@ -6,12 +6,12 @@ const repetition_types = @import("repetition_types.zig");
 pub const VMExecutionContext = @import("vm_execution_context.zig"); // Execution context file exposed as a type.
 
 pub const IntermediateMatch = struct { // Intermediary representation of matches before they are returned to the user.
-    groups: []const ?IntermediateMatchGroup,
+    groups: []const IntermediateMatchGroup,
 };
 
 pub const IntermediateMatchGroup = struct {
     start: usize, // Slices of original string passed in.
-    end: usize,
+    end: ?usize, // If the end is null, the group is not completed.
 };
 
 pub const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction. Unsure if needed.

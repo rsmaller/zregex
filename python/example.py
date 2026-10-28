@@ -12,4 +12,6 @@ print()
 zregex.print_bytecode(test)
 print()
 for i in range(len(my_match.groups)):
-    print("Group " + str(i) + ": " + my_match.groups[i])
+    print("Group " + str(i) + ": " + my_match[i])
+
+# print("Other name \"test\": " + str(my_match["test"]))

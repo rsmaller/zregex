@@ -21,7 +21,7 @@ repetition_consumed_input: bool, // Used to stop infinite looping of repetition.
 str_ptr: usize,
 current_group_ptr: ?usize, // the index that points to the current group frame.
 current_rep_ptr: ?usize,
-groups: ?[]?IntermediateMatchGroup,
+groups: ?[]IntermediateMatchGroup,
 
 
 // PUBLIC MEMBER FUNCTIONS
@@ -93,10 +93,14 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 self.current_group_ptr = self.stack.elementCount() - 1; // Top of the stack just pushed to is the group_ptr.
                 (try self.currentGroupReference()).* = .{ .start = self.str_ptr, .end = 0 };
             },
-            .capture_end => {
-                (try self.currentGroupReference()).*.?.end = self.str_ptr;
+            .capture_end => |id| {
+                (try self.currentGroupReference()).*.end = self.str_ptr;
                 const group_frame = try self.currentGroupFrame();
+                const old_group_ptr = self.current_group_ptr;
                 self.current_group_ptr = group_frame.previous_group_ptr;
+                if (id != 0) { // Push a backtrack-within frame if not ending the global group.
+                    try self.stack.push(allocator, .{ .group = .{ .current_group = (try self.currentGroupId()).?, .previous_group_ptr = old_group_ptr } });
+                }
             },
             .atomic_start => {
                 try self.stack.push(allocator, .atomic);
@@ -169,7 +173,6 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
             },
             .neg_lookahead_end => { // if this is reached that means the inside matched, which means the assertion failed, so backtrack.
                 if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = false })) {
-                std.debug.print("LOOKAHEAD NEG FAIL!!!\n", .{});
                 return null;
             }
             },
@@ -185,7 +188,6 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
             },
             .neg_lookbehind_end => {
                 if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = false })) {
-                    std.debug.print("LOOKAHEAD NEG FAIL!!!\n", .{});
                     return null;
                 }
             },
@@ -200,9 +202,9 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
             },
             .backref => |id| {
                 const group_compare_slice = try self.groupIndex(id);
-                if (group_compare_slice) |slice| {
-                    const len: usize = slice.end - slice.start;
-                    if (std.mem.eql(u8, string[slice.start..slice.end], string[self.str_ptr..])) {
+                if (group_compare_slice.end) |end| {
+                    const len: usize = end - group_compare_slice.start;
+                    if (std.mem.eql(u8, string[group_compare_slice.start..end], string[self.str_ptr..])) {
                         self.str_ptr += len;
                     } else {
                         if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
@@ -262,7 +264,7 @@ fn currentGroupId(self: *@This()) !?usize { // Uses the frame of the current gro
     return (try self.currentGroupFrame()).current_group;
 }
 
-fn currentGroupReference(self: *@This()) !*?IntermediateMatchGroup {
+fn currentGroupReference(self: *@This()) !*IntermediateMatchGroup {
     if (self.groups) |grps| {
         return &grps[(try self.currentGroupId()).?];
     } else {
@@ -270,7 +272,7 @@ fn currentGroupReference(self: *@This()) !*?IntermediateMatchGroup {
     }
 }
 
-fn groupIndex(self: *@This(), id: usize) !?IntermediateMatchGroup {
+fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
     if (self.groups) |grps| {
         return grps[id];
     } else {
@@ -321,7 +323,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
     switch (current_item) {
         .group => |grp| {
             self.current_group_ptr = grp.previous_group_ptr;
-            self.groups.?[grp.current_group] = null;
+            self.groups.?[grp.current_group].end = null;
         },
         .repeat => |rep| {
             const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
@@ -333,12 +335,12 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                     self.current_rep_ptr = rep.previous_rep_ptr;
                 },
                 .possessive => { // Exit repetition if within range; otherwise fail the match.
-                        if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
-                    self.jmp(rep.escape_jmp_index);
-                    return true;
-                } else {
-                    return false;
-                }
+                    if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
+                        self.jmp(rep.escape_jmp_index);
+                        return true;
+                    } else {
+                        return false;
+                    }
                 },
             }
         },
@@ -347,8 +349,6 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
             self.current_rep_ptr = choice.previous_rep_ptr;
             if (try self.currentRepFrameReference()) |frame_ref| { // Don't null error if there is no frame; there may be no current counter.
                     frame_ref.current_count = choice.previous_count;
-            } else {
-                std.debug.print("Choice point previous count not set: {d}\n", .{choice.previous_count});
             }
             self.jmp(choice.backtrack_ip);
             return true; // no failure incurred when backtracking has a fallback.
@@ -356,7 +356,6 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         .lookahead => |look| {
             if (look.negative and options.allow_across_lookthroughs) {
                 if (look.jmp_index) |look_jmp_index| {
-                    std.debug.print("Jumping out of negative; succeeded!\n", .{});
                     self.str_ptr = look.saved_str_ptr;
                     self.jmp(look_jmp_index + 1);
                     return true; // did NOT incur a failing state.
@@ -364,7 +363,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                     return core_types.VMError.NullIndexAccess;
                 }
                 // jump past end instruction; past the end instruction should only be reached when neg lookahead "fails".
-                }
+            }
         },
         .atomic => {
             return false;
