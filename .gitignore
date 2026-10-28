@@ -6,3 +6,7 @@ c-out/
 .vscode
 __pycache__/
 *.pyc
+*.exe
+*.dll
+*.dylib
+*.so
