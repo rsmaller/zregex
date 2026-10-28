@@ -32,6 +32,7 @@ void zregex_destroy_match(Match *match_handle);
 void zregex_init_zig(void *io_handle); // Takes in the Zig IO handle.
 void zregex_init_c(FILE *io_handle, CallbackFunc callback_fn); // Takes in a FILE ptr to stdout.
 
+void zregex_print_test(void);
 void zregex_print_bytecode(void *pattern_handle);
 void zregex_print_ast(void *pattern_handle, ASTPrintOptions options);
 

@@ -12,6 +12,9 @@ const ZigCIO = union(enum) {
         out_file: *cstdio.FILE,
         callback_fn: *const fn(*const anyopaque, usize, usize, *cstdio.FILE) callconv(.c) usize,
     },
+    python: struct {
+        callback_fn: *const fn([*]const u8, usize) callconv(.c) usize, // callback is never called with null-termed strings.
+    },
     pub fn print(self: *const @This(), comptime fmt: []const u8, args: anytype) !void {
         switch (self.*) {
             .zig => |zig_io| {
@@ -22,6 +25,11 @@ const ZigCIO = union(enum) {
                 _ = c_io.callback_fn(@ptrCast(buf.ptr), @sizeOf(u8), buf.len, c_io.out_file);
                 allocator.free(buf);
             },
+            .python => |py_io| {
+                const buf = try std.fmt.allocPrint(allocator, fmt, args);
+                _ = py_io.callback_fn(@ptrCast(buf.ptr), buf.len);
+                allocator.free(buf);
+            }
         }
     }
 };
@@ -30,8 +38,8 @@ var io_ref: ?ZigCIO = null;
 var gpa = std.heap.DebugAllocator(.{}){};
 const allocator = gpa.allocator();
 
-const BytecodeHandle = *opaque {}; // All translate to void * values in C header.
-const PatternHandle = *opaque {};
+const BytecodeHandle = ?*opaque {}; // All translate to void * values in C header.
+const PatternHandle = ?*opaque {};
 
 fn CStyleOptional(T: type) type {
     return extern struct {
@@ -51,7 +59,19 @@ pub export fn zregex_init_zig(io_handle: *std.Io.Writer) callconv(.c) void { // 
 }
 
 pub export fn zregex_init_c(io_handle: *cstdio.FILE, callback_fn: *anyopaque) callconv(.c) void {
-    io_ref = .{.c = .{ .out_file = io_handle, .callback_fn = @alignCast(@ptrCast(callback_fn)) }};
+    io_ref = .{.c = .{ .out_file = io_handle, .callback_fn = @alignCast(@ptrCast(callback_fn)) } };
+}
+
+pub export fn zregex_init_python(callback_fn: *anyopaque) callconv(.c) void {
+    io_ref = .{.python = .{.callback_fn = @alignCast(@ptrCast(callback_fn)) } };
+}
+
+pub export fn zregex_print_test() callconv(.c) void {
+    if (io_ref) |io| {
+        io.print("test\n", .{}) catch {};
+    } else {
+        @panic("Null I/O reference cannot be accessed for printing. Please ensure library has been properly initialized!");
+    }
 }
 
 pub export fn zregex_print_bytecode(pattern_handle: PatternHandle) callconv(.c) void {
@@ -152,6 +172,7 @@ pub export fn zregex_id_to_name(pattern_handle: PatternHandle, id: usize) callco
     if (name) |non_null_name| {
         var allocation: [*:0]u8 = allocator.allocSentinel(u8, non_null_name.len, 0) catch { return null; };
         @memcpy(allocation[0..non_null_name.len], non_null_name[0..]);
+        std.debug.print("{s}\n", .{allocation});
         return allocation;
     } else {
         return null;
