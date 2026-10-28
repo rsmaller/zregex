@@ -10,6 +10,15 @@ const instruction_types = @import("instruction_types.zig");
 pub const NameIDMap = struct {
     name_to_id_map: std.StringHashMap(usize),
     id_to_name_map: std.AutoHashMap(usize, []const u8),
+    allocator: std.mem.Allocator,
+    pub fn deinit(self: *@This()) void {
+        var iterator = self.id_to_name_map.iterator(); // Both maps use the same name heap allocations; only free names from one of them.
+        while (iterator.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*); // Hashmap entries are pointers to the data, so type is *[]const u8, not []const u8.
+        }
+        self.name_to_id_map.deinit();
+        self.id_to_name_map.deinit();
+    }
 };
 
 pub const ASTPrintOptions = extern struct {
@@ -29,8 +38,7 @@ pub const Pattern = struct {
             ast.deinit(self.allocator);
         }
         self.allocator.free(self.bytecode);
-        self.map.name_to_id_map.deinit();
-        self.map.id_to_name_map.deinit();
+        self.map.deinit();
     }
     pub fn nameToId(self: *const @This(), name: []const u8) ?usize {
         return self.map.name_to_id_map.get(name);

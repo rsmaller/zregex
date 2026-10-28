@@ -235,6 +235,9 @@ pub const ASTNode = union(enum) {
             },
             .group => |grp| {
                 grp.expr.deinit(allocator);
+                if (grp.name) |_| {
+                    allocator.free(grp.name.?);
+                }
                 allocator.destroy(self);
             },
             .repetition => |rep| {

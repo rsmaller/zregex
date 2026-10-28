@@ -49,7 +49,7 @@ pub fn main(init: std.process.Init) !void {
         if (match_id_container.present) {
             try stdout.print("Testing id fetch from name \"test\": {d}\n", .{match_id_container.value});
         } else {
-            try stdout.print("Testing id fetch from name \"test\": NULL\n", .{});
+            try stdout.print("Testing id fetch from name \"test\": <NULL>\n", .{});
         }
         for (0..match.*.group_count) |id| {
             try stdout.print("Group {d}", .{id});

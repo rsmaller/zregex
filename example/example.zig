@@ -54,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
         if (match_id_container) |id| {
             try stdout.print("Testing id fetch from name \"test\": {d}\n", .{id});
         } else {
-            try stdout.print("Testing id fetch from name \"test\": NULL\n", .{});
+            try stdout.print("Testing id fetch from name \"test\": <NULL>\n", .{});
         }
         for (match.groups, 0..) |item, id| {
             try stdout.print("Group {d}", .{id});

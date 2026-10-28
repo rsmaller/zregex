@@ -92,7 +92,7 @@ pub export fn zregex_print_ast(pattern_handle: PatternHandle, options: zregex.AS
     }
 }
 
-pub export fn zregex_compile(str: [*:0]u8) callconv(.c) ?PatternHandle {
+pub export fn zregex_compile(str: [*:0]u8) callconv(.c) PatternHandle {
     const string: []u8 = std.mem.span(str);
     var pattern: zregex.Pattern = zregex.compile(allocator, string) catch {
         return null;

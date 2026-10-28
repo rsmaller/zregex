@@ -25,7 +25,7 @@ fn mapNames(allocator: anytype, ast: *ast_types.ASTNode) !core_types.NameIDMap {
     var name_to_id_map = std.StringHashMap(usize).init(allocator);
     var id_to_name_map = std.AutoHashMap(usize, []const u8).init(allocator);
     try mapNamesRecursive(allocator, &name_to_id_map, &id_to_name_map, ast);
-    return .{ .name_to_id_map = name_to_id_map, .id_to_name_map = id_to_name_map };
+    return .{ .name_to_id_map = name_to_id_map, .id_to_name_map = id_to_name_map, .allocator = allocator, };
 }
 
 fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usize), id_to_name_map: *std.AutoHashMap(usize, []const u8), ast: *ast_types.ASTNode) !void {
@@ -43,8 +43,9 @@ fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usiz
         .group => |grp| {
             if (grp.name) |name| {
                 if (grp.id) |id| {
-                    try name_to_id_map.put(name, id);
-                    try id_to_name_map.put(id, name);
+                    const name_alloc = try allocator.dupe(u8, name); // Both hashmaps will share the same memory for keys/values.
+                    try name_to_id_map.put(name_alloc, id);
+                    try id_to_name_map.put(id, name_alloc);
                 } else {
                     return core_types.BytecodeGenError.InvalidGroupID;
                 }

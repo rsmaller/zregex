@@ -171,7 +171,8 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             lengthThreeLookaheadFound = true;
         } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?<")) {
             i.* += 1; // Consume '?'.
-            const name = try scanner.scanGroupName(str_to_parse, i);
+            const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
+            errdefer allocator.free(name);
             const expr = try parseExpr(allocator, str_to_parse, i);
             result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
             lengthThreeLookaheadFound = true;
