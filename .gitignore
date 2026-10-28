@@ -4,3 +4,5 @@ c-out/
 *.o
 .idea
 .vscode
+__pycache__/
+*.pyc
