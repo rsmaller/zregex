@@ -14,14 +14,20 @@ else:
 class InternalMatch(Structure): # typedef struct match in header.
     _fields_ = [ ("groups", POINTER(POINTER(c_char))), ("pattern_ptr", c_void_p), ("group_count", c_size_t) ]
 
-class ZOptional_size_t(Structure):
-    _fields_ = [ ("value", c_size_t) , ("present", c_bool) ]
-
 class ASTPrintOptions(Structure):
     _fields_ = [ ("show_match_width", c_bool) ]
 
-ZRegexCallbackFn = CFUNCTYPE(None, POINTER(c_char), c_size_t) # cannot use c_char_p due to null termination.
+def CStyleOptional(type): # Returns a zig struct optional type.
+    class ClassToReturn(Structure):
+        _fields_ = [ ("value", type) , ("present", c_bool) ]
+        def unpack(self):
+            if not self.present:
+                return None
+            else:
+                return self.value
+    return ClassToReturn
 
+ZRegexCallbackFn = CFUNCTYPE(None, POINTER(c_char), c_size_t) # cannot use c_char_p due to null termination.
 
 # True internal functions.
 
@@ -81,7 +87,7 @@ id_index_internal.restype = c_char_p
 
 name_to_id_internal = zregex_dylib.zregex_name_to_id
 name_to_id_internal.argtypes = [c_void_p, c_char_p]
-name_to_id_internal.restype = ZOptional_size_t
+name_to_id_internal.restype = CStyleOptional(c_size_t)
 
 id_to_name_internal = zregex_dylib.zregex_id_to_name
 id_to_name_internal.argtypes = [c_void_p, c_size_t]

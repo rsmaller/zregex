@@ -2,16 +2,18 @@ import zregex, sys
 
 zregex.init()
 test = zregex.compile(sys.argv[2])
-my_match = zregex.match(test, sys.argv[1])
+my_match = test.match(sys.argv[1])
 
 print("Pattern: " + sys.argv[2])
 print("Match str: " + sys.argv[1])
 print()
-zregex.print_ast(test, False)
+test.print_ast(False)
 print()
-zregex.print_bytecode(test)
+test.print_bytecode()
 print()
 for i in range(len(my_match.groups)):
     print("Group " + str(i) + ": " + my_match[i])
 
-# print("Other name \"test\": " + str(my_match["test"]))
+print("Other name \"test\": " + str(my_match["test"]))
+print("Id of that name: " + str(test.name_to_id("test")))
+print("Name of that id: " + str(test.id_to_name(test.name_to_id("test"))))

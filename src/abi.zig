@@ -172,7 +172,6 @@ pub export fn zregex_id_to_name(pattern_handle: PatternHandle, id: usize) callco
     if (name) |non_null_name| {
         var allocation: [*:0]u8 = allocator.allocSentinel(u8, non_null_name.len, 0) catch { return null; };
         @memcpy(allocation[0..non_null_name.len], non_null_name[0..]);
-        std.debug.print("{s}\n", .{allocation});
         return allocation;
     } else {
         return null;
