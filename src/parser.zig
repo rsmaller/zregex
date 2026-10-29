@@ -100,6 +100,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
     if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
         i.* += 1; // Consume '('.
         const result: *ast_types.ASTNode = try parseGroupExpr(allocator, str_to_parse, i);
+        errdefer result.deinit(allocator);
         i.* += 1; // consume ')'
         if (i.* < len) { // Don't check quantifiers when ) is at the end of the string.
             return try parseQuantifiers(result, allocator, str_to_parse, i);
@@ -135,7 +136,7 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         }
     }
     var atom: ?*ast_types.ASTNode = null;
-    defer {
+    errdefer {
         if (atom) |_| atom.?.deinit(allocator);
     }
     if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.

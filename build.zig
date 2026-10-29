@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const translate_c = b.dependency("translate_c", .{});
+
     const zregex_header: Translator = .init(translate_c, .{
         .c_source_file = b.path("include/zregex.h"),
         .target = target,

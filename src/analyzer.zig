@@ -305,11 +305,11 @@ fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
             }
             try trimAST(allocator, grp.expr);
         }, // outside of group, just recurse.
-        .alternation => {
-            const old_alt_parts = ast.alternation.parts;
-            ast.alternation.parts = try removeDuplicates(allocator, ast.alternation.parts);
+        .alternation => |*alt| {
+            const old_alt_parts = alt.parts;
+            alt.*.parts = try removeDuplicates(allocator, alt.parts);
             allocator.free(old_alt_parts);
-            for (ast.alternation.parts) |item| {
+            for (alt.parts) |item| {
                 try trimAST(allocator, item); // recurse after trimming.
             }
         },
@@ -321,9 +321,9 @@ fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
         .repetition => |rep| {
             try trimAST(allocator, rep.child);
         },
-        .class => {
-            const old_cls_items = ast.class.items;
-            ast.class.items = try removeDuplicates(allocator, ast.class.items);
+        .class => |*cls| {
+            const old_cls_items = cls.items;
+            cls.items = try removeDuplicates(allocator, cls.items);
             allocator.free(old_cls_items);
         },
         else => {
