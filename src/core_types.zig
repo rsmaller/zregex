@@ -51,7 +51,7 @@ pub const Pattern = struct {
 pub const Match = struct {
     groups: []?[:0]const u8,
     pattern_ptr: *const Pattern,
-    pub fn deinit(self: *const @This(), allocator: anytype) void {
+    pub fn deinit(self: *@This(), allocator: anytype) void {
         for (self.groups) |grp| {
             if (grp) |non_null_grp| {
                 allocator.free(non_null_grp);
