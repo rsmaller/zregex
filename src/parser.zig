@@ -134,7 +134,10 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             else => {},
         }
     }
-    var atom: *ast_types.ASTNode = undefined;
+    var atom: ?*ast_types.ASTNode = null;
+    defer {
+        if (atom) atom.?.deinit(allocator);
+    }
     if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
         i.* += 1; // Consume the '['.
         atom = try parseCharCLass(allocator, str_to_parse, i);
