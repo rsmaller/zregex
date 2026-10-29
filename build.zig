@@ -1,11 +1,27 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const translate_c = b.dependency("translate_c", .{});
+    const zregex_header: Translator = .init(translate_c, .{
+        .c_source_file = b.path("include/zregex.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const c_headers: Translator = .init(translate_c, .{
+        .c_source_file = b.path("include/c.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const zregex_mod = b.addModule("zregex", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
     });
+
     const zregex_dylib = b.addLibrary(.{
         .name = "zregex",
         .linkage = .dynamic,
@@ -16,6 +32,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
             .imports = &.{
                 .{ .name = "zregex", .module = zregex_mod },
+                .{ .name = "c_headers", .module = c_headers.mod },
             },
         }),
     });
@@ -37,10 +54,12 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("example/example2.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zregex_header", .module = zregex_header.mod },
+            },
         }),
     });
     exe2.root_module.linkLibrary(zregex_dylib);
-    exe2.root_module.addIncludePath(b.path("include/"));
     b.installArtifact(exe);
     b.installArtifact(exe2);
 

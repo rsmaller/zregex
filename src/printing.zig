@@ -147,7 +147,7 @@ fn printBinary(out_interface: anytype, binval: anytype, options: struct { show_l
     const T = @TypeOf(binval);
     const info = @typeInfo(T);
     const bitlength = @sizeOf(T) * 8;
-    var digit_arr: [bitlength]u1 = [1]u1{0} ** bitlength;
+    var digit_arr: [bitlength]u1 = @splat(0);
     switch (info) {
         .int => {
             var digit_arr_index: usize = @as(usize, bitlength) - 1;

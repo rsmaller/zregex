@@ -48,6 +48,7 @@ pub fn IntrospectedTypeClass(T: type) type {
         .@"anyframe" => |payload| @TypeOf(payload),
         .vector => |payload| @TypeOf(payload),
         .enum_literal => |payload| @TypeOf(payload),
+        .spirv => |payload| @TypeOf(payload),
     };
 }
 

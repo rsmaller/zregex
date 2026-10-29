@@ -2,7 +2,7 @@
 const std = @import("std");
 const zregex = @import("zregex");
 const builtin = @import("builtin");
-const debug_enabled = builtin.mode == .Debug;
+const debug_enabled = builtin.mode == .debug;
 
 pub fn main(init: std.process.Init) !void {
     const fixed_alloc_buffer_size: comptime_int = if (debug_enabled) 0 else 65535;
@@ -37,10 +37,10 @@ pub fn main(init: std.process.Init) !void {
     try stdout.print("\nBytecode:\n", .{});
     zregex.printBytecode(stdout, compiled_pattern);
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});
-    const my_match = try compiled_pattern.match(allocator, string_to_match);
+    var my_match = try compiled_pattern.match(allocator, string_to_match);
     defer {
-        if (my_match) |matched| {
-            matched.deinit(allocator);
+        if (my_match) |_| {
+            my_match.?.deinit(allocator);
         }
     }
     if (my_match) |match| {

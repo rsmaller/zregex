@@ -1,7 +1,7 @@
 // An example program using zregex as a dynamic library + C header.
 const std = @import("std");
 const builtin = @import("builtin");
-const cabi = @cImport(@cInclude("zregex.h"));
+const cabi = @import("zregex_header");
 
 pub fn main(init: std.process.Init) !void {
     // var gpa = std.heap.DebugAllocator(.{}){}; // Dynamic lib program only uses heap for simplicity.

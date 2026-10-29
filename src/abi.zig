@@ -2,15 +2,15 @@
 // The zregex module can itself be imported into a zig program as well.
 const std = @import("std");
 const zregex = @import("zregex");
-const cstdio = @cImport(@cInclude("stdio.h"));
+const c_headers = @import("c_headers");
 
 const ZigCIO = union(enum) {
     zig: struct { // Language-native; no callback fn required.
         io: *std.Io.Writer,
     },
     c: struct {
-        out_file: *cstdio.FILE,
-        callback_fn: *const fn(*const anyopaque, usize, usize, *cstdio.FILE) callconv(.c) usize,
+        out_file: *c_headers.FILE,
+        callback_fn: *const fn(*const anyopaque, usize, usize, *c_headers.FILE) callconv(.c) usize,
     },
     python: struct {
         callback_fn: *const fn([*]const u8, usize) callconv(.c) usize, // callback is never called with null-termed strings.
@@ -58,7 +58,7 @@ pub export fn zregex_init_zig(io_handle: *std.Io.Writer) callconv(.c) void { // 
     io_ref = .{.zig = .{ .io = io_handle } };
 }
 
-pub export fn zregex_init_c(io_handle: *cstdio.FILE, callback_fn: *anyopaque) callconv(.c) void {
+pub export fn zregex_init_c(io_handle: *c_headers.FILE, callback_fn: *anyopaque) callconv(.c) void {
     io_ref = .{.c = .{ .out_file = io_handle, .callback_fn = @alignCast(@ptrCast(callback_fn)) } };
 }
 
