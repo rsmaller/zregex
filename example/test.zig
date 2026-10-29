@@ -11,7 +11,7 @@ test "fuzzy" {
         var data: [32]u8 = undefined;
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len = smith.slice(&data);
-            var item = try zregex.compile(std.testing.allocator, data[0..len]);
+            var item = zregex.compile(std.testing.allocator, data[0..len]) catch {}; // Compilation errors are OK, as long as they don't crash :)
             defer item.deinit();
         }
     };
