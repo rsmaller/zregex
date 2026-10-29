@@ -146,8 +146,8 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
         atom = try parseAtom(allocator, str_to_parse, i, char_to_set, metacharacter);
         i.* += 1; // Consume the last character of the leaf.
     }
-    if (i.* >= len) return atom; // Only if at end of string, otherwise check for repetition.
-    return try parseQuantifiers(atom, allocator, str_to_parse, i);
+    if (i.* >= len) return atom.?; // Only if at end of string, otherwise check for repetition.
+    return try parseQuantifiers(atom.?, allocator, str_to_parse, i);
 }
 
 fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
