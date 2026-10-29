@@ -72,6 +72,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zregex", .module = zregex_mod },
             },
         }),
+        .use_llvm = true,
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
