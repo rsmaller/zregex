@@ -8,7 +8,6 @@ test "abc" {
 }
 
 test "fuzzy" {
-    std.log.info("Testing with fuzz length {d}\n\n", .{test_options.fuzzlen});
     const t = struct {
         var data: [test_options.fuzzlen]u8 = undefined;
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
