@@ -75,6 +75,11 @@ pub fn build(b: *std.Build) void {
         }),
         .use_llvm = true,
     });
+    const test_options = b.addOptions();
+    const fuzzlen = b.option(usize, "fuzzlen", "The length of the buffer the fuzzer will use for testing.") orelse 32; // Default fuzz length is 32.
+    std.debug.print("Fuzzing will be done with length {d}\n", .{fuzzlen});
+    test_options.addOption(usize, "fuzzlen", fuzzlen);
+    exe_tests.root_module.addOptions("test_options", test_options);
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);

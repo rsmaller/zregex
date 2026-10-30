@@ -157,67 +157,57 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
     result.* = .failed_parse;
     errdefer result.deinit(allocator);
-    var lengthThreeLookaheadFound = false;
-    if (i.* + 2 < len and str_to_parse[i.*] == '?') {
-        if (std.mem.eql(u8, str_to_parse[i.*..i.*+3], "?<=")) {
-            i.* += 3; // consume ?<=
-            const expr = try parseExpr(allocator, str_to_parse, i); // Changed to initialize in local variable to prevent defer free segfault at 0x0. Possible compiler bug?
-            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{
-                .non_capturing = .{ .lookbehind = 0 },
-            }, .negated = false } };
-            lengthThreeLookaheadFound = true;
-        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+3], "?<!")) {
-            i.* += 3; // consume ?<!
-            const expr = try parseExpr(allocator, str_to_parse, i);
-            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{
-                .non_capturing = .{ .lookbehind = 0 },
-            }, .negated = true } };
-            lengthThreeLookaheadFound = true;
-        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?<")) {
-            i.* += 1; // Consume '?'.
-            const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
-            errdefer allocator.free(name);
-            const expr = try parseExpr(allocator, str_to_parse, i);
-            result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
-            lengthThreeLookaheadFound = true;
+    if (str_to_parse[i.*] == '?') {
+        var lengthThreeLookaheadFound = true;
+        if (i.* + 2 < len) { // Check for length 3 group markers.
+            if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 3], "?<=")) {
+                i.* += 3; // consume ?<=
+                const expr = try parseExpr(allocator, str_to_parse, i); // Changed to initialize in local variable to prevent defer free segfault at 0x0. Possible compiler bug?
+                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = false, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
+            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 3], "?<!")) {
+                i.* += 3; // consume ?<!
+                const expr = try parseExpr(allocator, str_to_parse, i);
+                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = true, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
+            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?<")) {
+                i.* += 1; // Consume '?'.
+                const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
+                errdefer allocator.free(name);
+                const expr = try parseExpr(allocator, str_to_parse, i);
+                result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
+            } else {
+                lengthThreeLookaheadFound = false;
+            }
         }
-    }
-    var lengthTwoLookaheadFound = false;
-    if (!lengthThreeLookaheadFound and i.* + 1 < len and str_to_parse[i.*] == '?') { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
-        if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?=")) {
-            i.* += 2; // consume ?=
-            const expr = try parseExpr(allocator, str_to_parse, i);
-            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
-            lengthTwoLookaheadFound = true;
-        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?!")) {
-            i.* += 2; // consume ?!
-            const expr = try parseExpr(allocator, str_to_parse, i);
-            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
-            lengthTwoLookaheadFound = true;
-        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?:")) {
-            i.* += 2; // consume ?:
-            const expr = try parseExpr(allocator, str_to_parse, i);
-            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
-            lengthTwoLookaheadFound = true;
-        } else if (std.mem.eql(u8, str_to_parse[i.*..i.*+2], "?>")) {
-            i.* += 2; // consume ?>
-            const expr = try parseExpr(allocator, str_to_parse, i);
-            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
-            lengthTwoLookaheadFound = true;
-        } else { // ? found but no matching flag.
+        if (!lengthThreeLookaheadFound and i.* + 1 < len) { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
+            if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?=")) {
+                i.* += 2; // consume ?=
+                const expr = try parseExpr(allocator, str_to_parse, i);
+                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
+            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?!")) {
+                i.* += 2; // consume ?!
+                const expr = try parseExpr(allocator, str_to_parse, i);
+                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
+            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?:")) {
+                i.* += 2; // consume ?:
+                const expr = try parseExpr(allocator, str_to_parse, i);
+                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
+            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?>")) {
+                i.* += 2; // consume ?>
+                const expr = try parseExpr(allocator, str_to_parse, i);
+                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
+            } else { // ? found but no matching flag.
+                return core_types.ParsingError.TokenNotFound;
+            }
+        } else if (i.* + 2 >= len) { // If there is a flag start but no room for another character, emit an end of string error.
+            return core_types.ParsingError.EndOfString;
+        } else { // Assume the flag start is invalid.
             return core_types.ParsingError.TokenNotFound;
         }
-    } else if (i.* + 2 >= len and str_to_parse[i.*] == '?') { // If there is a flag start but no room for another character, emit an end of string error.
-        return core_types.ParsingError.EndOfString;
-    }
-    if (str_to_parse[i.*] == '?') {
-        return core_types.ParsingError.TokenNotFound;
-    }
-    if (!lengthTwoLookaheadFound and !lengthThreeLookaheadFound) { // otherwise, do regular group.
+    } else {
         const expr = try parseExpr(allocator, str_to_parse, i);
         result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
     }
-    if (i.* >= len) {
+    if (i.* >= len) { // Only need length check again if i is potentially incremented in parseExpr().
         return core_types.ParsingError.EndOfString;
     }
     if (str_to_parse[i.*] != ')') {
@@ -284,6 +274,9 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
                 count_min = 0;
             } else {
                 count_min = try scanner.scanNumeric(str_to_parse, i);
+                if (i.* >= str_to_parse.len) {
+                    return core_types.ParsingError.EndOfString;
+                }
             }
             if (str_to_parse[i.*] != ',') { // If comma is not encountered, it is one number so min and max should be the same.
                 count_max = .{ .bounded = count_min };

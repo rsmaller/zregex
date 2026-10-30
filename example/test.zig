@@ -1,14 +1,16 @@
 const std = @import("std");
 const zregex = @import("zregex");
+const test_options = @import("test_options");
 
 test "abc" {
-    var val  = try zregex.compile(std.testing.allocator, "abc");
+    var val = try zregex.compile(std.testing.allocator, "abc");
     defer val.deinit();
 }
 
 test "fuzzy" {
+    std.log.info("Testing with fuzz length {d}\n\n", .{test_options.fuzzlen});
     const t = struct {
-        var data: [32]u8 = undefined;
+        var data: [test_options.fuzzlen]u8 = undefined;
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len = smith.slice(&data);
             var item = zregex.compile(std.testing.allocator, data[0..len]) catch {
@@ -19,3 +21,4 @@ test "fuzzy" {
     };
     try std.testing.fuzz({}, t.fuzzFn, .{});
 }
+
