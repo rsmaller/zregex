@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("example/test.zig"),
+            .root_source_file = b.path("test/test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
