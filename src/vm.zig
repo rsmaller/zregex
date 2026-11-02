@@ -16,7 +16,7 @@ pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Patt
             group_arr[i] = null;
         }
     }
-    return core_types.Match{ .groups = group_arr, .pattern_ptr = pattern };
+    return core_types.Match{ .groups = group_arr, .pattern_ptr = pattern, .allocator = allocator };
 }
 
 pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.Match {

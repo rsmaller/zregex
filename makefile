@@ -5,6 +5,8 @@ LFLAGS = -L./c-out/
 OS := $(shell uname)
 ifeq ($(OS), Darwin)
 	LFLAGS += -Wl,-rpath,./c-out
+else ifeq ($(OS), Linux)
+	LFLAGS += -Wl,-R,./c-out
 endif
 
 default: all

@@ -40,7 +40,7 @@ pub fn main(init: std.process.Init) !void {
     var my_match = try compiled_pattern.match(allocator, string_to_match);
     defer {
         if (my_match) |_| {
-            my_match.?.deinit(allocator);
+            my_match.?.deinit();
         }
     }
     if (my_match) |match| {

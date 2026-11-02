@@ -51,13 +51,14 @@ pub const Pattern = struct {
 pub const Match = struct {
     groups: []?[:0]const u8,
     pattern_ptr: *const Pattern,
-    pub fn deinit(self: *@This(), allocator: anytype) void {
+    allocator: std.mem.Allocator,
+    pub fn deinit(self: *@This()) void {
         for (self.groups) |grp| {
             if (grp) |non_null_grp| {
-                allocator.free(non_null_grp);
+                self.allocator.free(non_null_grp);
             }
         }
-        allocator.free(self.groups);
+        self.allocator.free(self.groups);
     }
     pub fn nameIndex(self: *const @This(), name: []const u8) ?[]const u8 {
         if (self.pattern_ptr.nameToId(name)) |id| {
