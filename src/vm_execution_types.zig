@@ -28,7 +28,7 @@ pub const ChoicePointStackFrame = struct {
     backtrack_ip: usize,
     stack_depth: usize,
     backtrack_str_ptr: usize,
-    previous_count: ?usize,
+    previous_count: usize, // Assumed as 0 when not present.
     previous_rep_ptr: ?usize,
 };
 

@@ -53,12 +53,12 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 return core_types.MatchError.BadHeaderScan;
             },
             .split => |split_instr| {
-                const current_count = try self.currentCount();
+                const current_count = try self.currentCount() orelse 0;
                 try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                 self.jmp(split_instr.left);
             },
             .repeat_start => |rep| {
-                const current_count = try self.currentCount();
+                const current_count = try self.currentCount() orelse 0;
                 try self.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = self.current_rep_ptr, .previous_str_ptr =  self.str_ptr, .current_count = 0, .escape_jmp_index = rep.escape_jmp_index } });
                 self.current_rep_ptr = self.stack.elementCount() - 1;
                 if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
@@ -69,11 +69,9 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 try self.repeat_next_iteration(allocator, end);
             },
             .jmp => |jmp_instr| {
-                std.debug.print("JUMPING TO {d}\n", .{jmp_instr});
                 self.jmp(jmp_instr);
             },
             .literal => |lit| {
-                std.debug.print("LIT MATCH\n", .{});
                 const literal_match_container = literal_match(lit, string, self.str_ptr);
                 if (literal_match_container.matching) {
                     if (literal_match_container.consuming) {
@@ -310,11 +308,11 @@ fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
     } else {
         switch (mode) {
             .greedy => {
-                try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = self.ip + 1, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = (try self.currentCount()), .previous_rep_ptr = self.current_rep_ptr } });
+                try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = self.ip + 1, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                 self.jmp(jump_index);
             },
             .lazy => {
-                try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = (try self.currentCount()), .previous_rep_ptr = self.current_rep_ptr } });
+                try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                 self.jmp(self.ip + 1);
             },
             .possessive => {
@@ -355,9 +353,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                 self.str_ptr = choice.backtrack_str_ptr;
                 self.current_rep_ptr = choice.previous_rep_ptr;
                 if (try self.currentRepFrameReference()) |frame_ref| { // Don't null error if there is no frame; there may be no current counter.
-                        frame_ref.current_count = choice.previous_count orelse {
-                            return core_types.MatchError.InvalidStackFrameMemberAccess;
-                        };
+                    frame_ref.current_count = choice.previous_count;
                 }
                 self.jmp(choice.backtrack_ip);
                 return true; // no failure incurred when backtracking has a fallback.
