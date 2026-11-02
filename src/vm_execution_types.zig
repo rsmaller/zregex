@@ -28,7 +28,7 @@ pub const ChoicePointStackFrame = struct {
     backtrack_ip: usize,
     stack_depth: usize,
     backtrack_str_ptr: usize,
-    previous_count: usize,
+    previous_count: ?usize,
     previous_rep_ptr: ?usize,
 };
 
@@ -79,7 +79,7 @@ pub fn Stack(T: type) type {
         }
         pub fn pop(self: *@This(), allocator: anytype) !T {
             if (self.size == 0) {
-                return core_types.VMError.StackEmptyError;
+                return core_types.MatchError.EmptyStack;
             }
             self.size -= 1;
             const ret: T = self.data[self.size];
@@ -90,13 +90,13 @@ pub fn Stack(T: type) type {
         }
         pub fn peek(self: *@This()) !T {
             if (!self.hasItem()) {
-                return core_types.VMError.StackEmptyError;
+                return core_types.MatchError.EmptyStack;
             }
             return self.data[self.size - 1];
         }
         pub fn fetchPtrAtIndex(self: *@This(), index: usize) !*T {
             if (index >= self.size) {
-                return core_types.VMError.InvalidStackAccess;
+                return core_types.MatchError.OutOfBoundsStack;
             }
             return &self.data[index];
         }

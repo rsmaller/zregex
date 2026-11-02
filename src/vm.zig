@@ -27,7 +27,7 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
     switch (bytecode[0]) {
         .header_start => {},
         else => {
-            return core_types.BytecodeGenError.UnexpectedBytecodeType;
+            return core_types.MatchError.BadHeaderScan;
         },
     }
     var i: usize = 1;
@@ -35,7 +35,7 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
         switch (bytecode[i]) {
             .allocate_groups => |alloc_instr| {
                 if (main_context.groups) |_| {
-                    return core_types.VMError.InvalidGroupAllocation;
+                    return core_types.MatchError.DuplicateGroupAllocation;
                 } else {
                     main_context.groups = try allocator.alloc(vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
                     if (main_context.groups) |grps| {
@@ -48,12 +48,12 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
                 break;
             },
             else => {
-                return core_types.VMError.InvalidStackArrangement; // bytecode[0] should be alloc_groups instruction.
+                return core_types.MatchError.BadHeaderScan; // bytecode[0] should be alloc_groups instruction.
             },
         }
     }
     if (i >= bytecode.len) {
-        return core_types.VMError.BadHeaderScan;
+        return core_types.MatchError.BadHeaderScan;
     }
     while (test_start_ptr < string.len) : (test_start_ptr += 1) {
         main_context.ip = i; // ensure to reset ip every time. ip index 0 should be the ALLOC_GROUPS() instruction, which is run only once at the start.

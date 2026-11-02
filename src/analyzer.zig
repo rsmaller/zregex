@@ -47,7 +47,7 @@ fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usiz
                     try name_to_id_map.put(name_alloc, id);
                     try id_to_name_map.put(id, name_alloc);
                 } else {
-                    return core_types.BytecodeGenError.InvalidGroupID;
+                    return core_types.AnalysisError.NullGroupID;
                 }
             }
             try mapNamesRecursive(allocator, name_to_id_map, id_to_name_map, grp.expr);

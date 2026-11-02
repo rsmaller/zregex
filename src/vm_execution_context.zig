@@ -45,31 +45,35 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
     }
 }
 
-pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) !?IntermediateMatch {
+pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
     while (self.ip < bytecode.len) {
         self.jmp_queued = false;
         switch (bytecode[self.ip]) {
             .allocate_groups, .header_start, .header_end => { // This should only be done once per higher-level call to the VM, at bytecode index 0.
-                return core_types.VMError.InvalidStackArrangement;
+                return core_types.MatchError.BadHeaderScan;
             },
             .split => |split_instr| {
-                try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = (try self.currentCount()), .previous_rep_ptr = self.current_rep_ptr } });
-                self.ip = split_instr.left;
+                const current_count = try self.currentCount();
+                try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = split_instr.right, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
+                self.jmp(split_instr.left);
             },
             .repeat_start => |rep| {
+                const current_count = try self.currentCount();
                 try self.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = self.current_rep_ptr, .previous_str_ptr =  self.str_ptr, .current_count = 0, .escape_jmp_index = rep.escape_jmp_index } });
                 self.current_rep_ptr = self.stack.elementCount() - 1;
                 if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
-                    try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = (try self.currentCount()), .previous_rep_ptr = self.current_rep_ptr } });
+                    try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                 } // repeat_end points to the instruction after the repeat_start, which is the instruction in the context here.
             },
             .repeat_end => |end| {
                 try self.repeat_next_iteration(allocator, end);
             },
             .jmp => |jmp_instr| {
+                std.debug.print("JUMPING TO {d}\n", .{jmp_instr});
                 self.jmp(jmp_instr);
             },
             .literal => |lit| {
+                std.debug.print("LIT MATCH\n", .{});
                 const literal_match_container = literal_match(lit, string, self.str_ptr);
                 if (literal_match_container.matching) {
                     if (literal_match_container.consuming) {
@@ -85,7 +89,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 if (self.groups) |grps| {
                     return IntermediateMatch{ .groups = grps };
                 } else {
-                    return core_types.VMError.InvalidGroupAllocation;
+                    return core_types.MatchError.NoGroupAllocation;
                 }
             },
             .capture_start => |cap| {
@@ -118,7 +122,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                     }
                 }
                 if (!atomic_frame_found) {
-                    return core_types.VMError.InvalidStackArrangement;
+                    return core_types.MatchError.MissingStartFrame;
                 }
             },
             .lookahead_start => {
@@ -138,7 +142,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                     }
                 }
                 if (!lookahead_frame_found) {
-                    return core_types.VMError.InvalidStackArrangement;
+                    return core_types.MatchError.MissingStartFrame;
                 }
             },
             .lookbehind_start => |len| {
@@ -165,7 +169,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                     }
                 }
                 if (!lookahead_frame_found) {
-                    return core_types.VMError.InvalidStackArrangement;
+                    return core_types.MatchError.MissingStartFrame;
                 }
             },
             .neg_lookahead_start => |jmp_index| {
@@ -234,7 +238,7 @@ fn currentRepFrameReference(self: *@This()) !?*RepeatStackFrame {
                 return rep;
             },
             else => {
-                return core_types.VMError.InvalidStackArrangement;
+                return core_types.MatchError.BadStackFrameType;
             },
         }
     } else {
@@ -242,11 +246,12 @@ fn currentRepFrameReference(self: *@This()) !?*RepeatStackFrame {
     }
 }
 
-fn currentCount(self: *@This()) !usize {
+fn currentCount(self: *@This()) !?usize {
     if (try self.currentRepFrameReference()) |frame_ref| {
         return frame_ref.current_count;
+    } else {
+        return null;
     }
-    return core_types.VMError.NullIndexAccess;
 }
 
 fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of the frame representing the current group.
@@ -255,7 +260,7 @@ fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of 
             return grp;
         },
         else => {
-            return core_types.VMError.InvalidStackArrangement;
+            return core_types.MatchError.BadStackFrameType;
         },
     }
 }
@@ -268,7 +273,7 @@ fn currentGroupReference(self: *@This()) !*IntermediateMatchGroup {
     if (self.groups) |grps| {
         return &grps[(try self.currentGroupId()).?];
     } else {
-        return core_types.VMError.NullIndexAccess;
+        return core_types.MatchError.NoGroupAllocation;
     }
 }
 
@@ -276,24 +281,26 @@ fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
     if (self.groups) |grps| {
         return grps[id];
     } else {
-        return core_types.VMError.NullIndexAccess;
+        return core_types.MatchError.NoGroupAllocation;
     }
 }
 
 // Sets the VM to the next repetition iteration and returns true if the given repetition has incremented the str pointer successfully.
  fn repeat_next_iteration(self: *@This(), allocator: anytype, jump_index: usize) !void {
     var current_frame_ref: *RepeatStackFrame = undefined;
-    if (try self.currentRepFrameReference()) |frame_ref| {
+    if (try self.currentRepFrameReference()) |frame_ref| { // Iterating means the repetition frame should never be null.
         current_frame_ref = frame_ref;
     } else {
-        return core_types.VMError.NullIndexAccess;
+        return core_types.MatchError.NullStackFrame;
     }
     current_frame_ref.current_count += 1;
     self.repetition_consumed_input = self.str_ptr > current_frame_ref.previous_str_ptr;
     const min: usize = current_frame_ref.min;
     const max: repetition_types.RepetitionBoundType = current_frame_ref.max;
     const mode: repetition_types.RepeaterType = current_frame_ref.mode;
-    const current_count = try self.currentCount();
+    const current_count = try self.currentCount() orelse {
+        return core_types.MatchError.InvalidStackFrameMemberAccess;
+    };
     if (current_count < min) {
         self.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
     } else if (repetition_count_cmp(current_count, max, .GE) or !self.repetition_consumed_input) { // Exit if within range and repetition did not consume anything, or if past max.
@@ -319,57 +326,59 @@ fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
 
 fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !bool { // Returns false when there is no fallback.
     while (self.stack.hasItem()) {
-    const current_item = try self.stack.pop(allocator);
-    switch (current_item) {
-        .group => |grp| {
-            self.current_group_ptr = grp.previous_group_ptr;
-            self.groups.?[grp.current_group].end = null;
-        },
-        .repeat => |rep| {
-            const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
-                switch (rep.mode) {
-                .greedy => {
-                    self.current_rep_ptr = rep.previous_rep_ptr;
-                },
-                .lazy => {
-                    self.current_rep_ptr = rep.previous_rep_ptr;
-                },
-                .possessive => { // Exit repetition if within range; otherwise fail the match.
-                    if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
-                        self.jmp(rep.escape_jmp_index);
-                        return true;
-                    } else {
-                        return false;
-                    }
-                },
-            }
-        },
-        .choice_point => |choice| {
-            self.str_ptr = choice.backtrack_str_ptr;
-            self.current_rep_ptr = choice.previous_rep_ptr;
-            if (try self.currentRepFrameReference()) |frame_ref| { // Don't null error if there is no frame; there may be no current counter.
-                    frame_ref.current_count = choice.previous_count;
-            }
-            self.jmp(choice.backtrack_ip);
-            return true; // no failure incurred when backtracking has a fallback.
+        const current_item = try self.stack.pop(allocator);
+        switch (current_item) {
+            .group => |grp| {
+                self.current_group_ptr = grp.previous_group_ptr;
+                self.groups.?[grp.current_group].end = null;
             },
-        .lookahead => |look| {
-            if (look.negative and options.allow_across_lookthroughs) {
-                if (look.jmp_index) |look_jmp_index| {
-                    self.str_ptr = look.saved_str_ptr;
-                    self.jmp(look_jmp_index + 1);
-                    return true; // did NOT incur a failing state.
-                    } else {
-                    return core_types.VMError.NullIndexAccess;
+            .repeat => |rep| {
+                const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
+                    switch (rep.mode) {
+                    .greedy => {
+                        self.current_rep_ptr = rep.previous_rep_ptr;
+                    },
+                    .lazy => {
+                        self.current_rep_ptr = rep.previous_rep_ptr;
+                    },
+                    .possessive => { // Exit repetition if within range; otherwise fail the match.
+                        if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
+                            self.jmp(rep.escape_jmp_index);
+                            return true;
+                        } else {
+                            return false;
+                        }
+                    },
                 }
-                // jump past end instruction; past the end instruction should only be reached when neg lookahead "fails".
-            }
-        },
-        .atomic => {
-            return false;
-        },
+            },
+            .choice_point => |choice| {
+                self.str_ptr = choice.backtrack_str_ptr;
+                self.current_rep_ptr = choice.previous_rep_ptr;
+                if (try self.currentRepFrameReference()) |frame_ref| { // Don't null error if there is no frame; there may be no current counter.
+                        frame_ref.current_count = choice.previous_count orelse {
+                            return core_types.MatchError.InvalidStackFrameMemberAccess;
+                        };
+                }
+                self.jmp(choice.backtrack_ip);
+                return true; // no failure incurred when backtracking has a fallback.
+            },
+            .lookahead => |look| {
+                if (look.negative and options.allow_across_lookthroughs) {
+                    if (look.jmp_index) |look_jmp_index| {
+                        self.str_ptr = look.saved_str_ptr;
+                        self.jmp(look_jmp_index + 1);
+                        return true; // did NOT incur a failing state.
+                    } else {
+                        return core_types.MatchError.InvalidStackFrameMemberAccess;
+                    }
+                    // jump past end instruction; past the end instruction should only be reached when neg lookahead "fails".
+                }
+            },
+            .atomic => {
+                return false;
+            },
+        }
     }
-}
     return false;
 }
 

@@ -70,7 +70,7 @@ pub const Match = struct {
     }
 };
 
-pub const ParsingError = error{
+pub const ParsingError = error {
     TokenNotFound,
     EndOfString,
     InvalidRange,
@@ -78,23 +78,29 @@ pub const ParsingError = error{
     InvalidGroupName,
 };
 
-pub const BytecodeGenError = error{
-    InvalidGroupID,
-    InvalidClassMember,
-    InvalidTypeConversion,
-    UnexpectedBytecodeType,
-};
 
-pub const VMError = error{
-    InvalidGroupAllocation,
-    InvalidStackArrangement,
-    BadHeaderScan,
-    StackEmptyError,
-    InvalidStackAccess,
-    NullIndexAccess,
-};
-
-pub const AnalysisError = error{
+pub const AnalysisError = error {
     UnknownLength,
     InvalidRepetition,
+    NullGroupID,
 };
+
+pub const CodegenError = error {
+    InvalidClassChild,
+    InvalidLiteral,
+    UnexpectedBytecodeType,
+    NullGroupID,
+};
+
+pub const MatchError = error {
+    NoGroupAllocation,
+    DuplicateGroupAllocation,
+    BadStackFrameType,
+    BadHeaderScan,
+    EmptyStack,
+    OutOfBoundsStack,
+    NullStackFrame,
+    InvalidStackFrameMemberAccess,
+    MissingStartFrame,
+};
+

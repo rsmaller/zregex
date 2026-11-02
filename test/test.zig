@@ -2,6 +2,7 @@ const std = @import("std");
 const zregex = @import("zregex");
 const test_options = @import("test_options");
 const file_scan = @import("corpus_scan.zig");
+const core_types = zregex.core_types;
 
 test "abc" {
     var val = try zregex.compile(std.testing.allocator, "abc");
@@ -26,6 +27,15 @@ test "fuzz_parser" {
     });
 }
 
+
+pub fn debugPrint(comptime fmt: []const u8, args: anytype) !void {
+    std.debug.print(fmt, args);
+}
+
+const FudgeIOStruct = struct {
+    print: @TypeOf(debugPrint) = debugPrint,
+};
+
 test "fuzz_vm" {
     const t = struct {
         var data1: [test_options.fuzzlen]u8 = undefined;
@@ -38,15 +48,10 @@ test "fuzz_vm" {
             }; // Compilation errors are OK, as long as they don't crash :)
             defer item.deinit();
             var match = item.match(std.testing.allocator, data2[0..len2]) catch |err| {
-                switch(err) {
-                    .BadHeaderScan, .StackEmptyError, .InvalidStackArrangement, .InvalidStackAccess, .NullIndexAccess, 
-                    .InvalidGroupID, .InvalidClassMember, .UnexpectedBytecodeType => {
-                        return err;
-                    },
-                    else => { 
-                        return; 
-                    }
-                }
+                std.debug.print("{s}\n", .{data1});
+                zregex.printBytecode(FudgeIOStruct{}, item);
+                std.debug.print("Error encountered: {s}\n", .{@errorName(err)});
+                return err;
             };
             defer { 
                 if(match) |*mat| mat.deinit(std.testing.allocator);

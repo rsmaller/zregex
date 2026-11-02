@@ -93,11 +93,8 @@ fn ToLiteralInstruction(leaf: ast_types.AtomNode) !instruction_types.LiteralInst
         .whitespace => {
             ret.data = .whitespace;
         },
-        .backref => {
-            return core_types.BytecodeGenError.InvalidTypeConversion;
-        },
-        .range => {
-            return core_types.BytecodeGenError.InvalidTypeConversion;
+        .backref, .range => {
+            return core_types.CodegenError.InvalidLiteral;
         },
     }
     return ret;
@@ -150,7 +147,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         try emitLabel(allocator, labels, instruction_ptr);
                         _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .capture_end = id }, instruction_ptr);
                     } else {
-                        return core_types.BytecodeGenError.InvalidGroupID;
+                        return core_types.CodegenError.NullGroupID;
                     }
                 },
                 .non_capturing => |grp_type| {
@@ -224,7 +221,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         mask_change_val = ALPHANUM_MASK;
                     },
                     .word_boundary, .start_anchor, .end_anchor, .any, .backref => {
-                        return core_types.BytecodeGenError.InvalidClassMember;
+                        return core_types.CodegenError.InvalidClassChild;
                     },
                     .whitespace => {
                         mask_change_val = WHITESPACE_MASK;
