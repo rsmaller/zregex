@@ -18,7 +18,7 @@ pub fn emit(allocator: anytype, analyzed_ast: ast_types.AnalyzedAST) ![]instruct
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .header_end, &instruction_index);
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .{ .capture_start = 0 }, &instruction_index);
     try emitLabel(allocator, &labels, &instruction_index);
-    try emitRecursive(allocator, &labels, &instructions, &fixups, ast, &instruction_index, 0);
+    try emitRecursive(allocator, &labels, &instructions, &fixups, ast, &analyzed_ast, &instruction_index, 0);
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .{ .capture_end = 0 }, &instruction_index);
     _ = try emitInstruction(allocator, &instructions, &fixups, .{ .permit_fixups = false }, .end_match, &instruction_index);
     const result = try instructions.toOwnedSlice(allocator);
@@ -58,7 +58,6 @@ fn emitInstruction(allocator: anytype, instructions: *std.ArrayList(instruction_
             .split => {
                 try fixups.append(allocator, index_ptr.* - 1);
             },
-            .end_match => {},
             else => {}, // Exhaustive switch requirement.
         }
     }
@@ -93,19 +92,23 @@ fn ToLiteralInstruction(leaf: ast_types.AtomNode) !instruction_types.LiteralInst
         .whitespace => {
             ret.data = .whitespace;
         },
-        .backref, .range => {
+        .backref_id, .backref_name, .range => {
             return core_types.CodegenError.InvalidLiteral;
         },
     }
     return ret;
 }
 
-fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), ast: *ast_types.ASTNode, instruction_ptr: *usize, recursion_level: usize) !void {
+fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions: *std.ArrayList(instruction_types.Instruction), fixups: *std.ArrayList(usize), ast: *ast_types.ASTNode, head_ptr: *const ast_types.AnalyzedAST, instruction_ptr: *usize, recursion_level: usize) !void {
     switch (ast.*) {
         .atom => |leaf| {
             switch (leaf.atom) {
-                .backref => |id| { // Backreferences are only handled as leaf nodes because of where they are handled in parsing; they do not correspond to a literal in bytecode.
+                .backref_id => |id| { // Backreferences are handled as leaf nodes because of where they are handled in parsing; they do not correspond to a literal in bytecode.
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id }, instruction_ptr);
+                },
+                .backref_name => |name| {
+                    const id = head_ptr.map.name_to_id_map.get(name) orelse return core_types.CodegenError.InvalidGroupName;
+                    _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id, }, instruction_ptr);
                 },
                 else => {
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .literal = try ToLiteralInstruction(leaf) }, instruction_ptr);
@@ -114,7 +117,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
         },
         .repetition => |rep| {
             const rep_start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_start = .{ .min = rep.reps.min, .max = rep.reps.max, .mode = rep.rep_type, .escape_jmp_index = 0 } }, instruction_ptr);
-            try emitRecursive(allocator, labels, instructions, fixups, rep.child, instruction_ptr, recursion_level + 1);
+            try emitRecursive(allocator, labels, instructions, fixups, rep.child, head_ptr, instruction_ptr, recursion_level + 1);
             const rep_end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .repeat_end = rep_start_index + 1 }, instruction_ptr); // *ast_types.ASTNode_end must just jump past the repeat_start instruction, to the next one, which may or may not be the repeat_end instruction itself.
             instructions.items[rep_start_index].repeat_start.escape_jmp_index = rep_end_index + 1; // for possessive matching frames to escape repetition when backtracking is attempted in range.
             try emitLabel(allocator, labels, instruction_ptr);
@@ -126,12 +129,12 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                 try emitLabel(allocator, labels, instruction_ptr);
                 const split_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = true }, .{ .split = .{ .left = labels.items.len, .right = 0 } }, instruction_ptr); // Left of the split is the label right after it; replaced with bytecode index after fixup.
                 try emitLabel(allocator, labels, instruction_ptr);
-                try emitRecursive(allocator, labels, instructions, fixups, alt.parts[i], instruction_ptr, recursion_level + 1);
+                try emitRecursive(allocator, labels, instructions, fixups, alt.parts[i], head_ptr, instruction_ptr, recursion_level + 1);
                 try jmp_instructions_indices.append(allocator, try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .jmp = 0 }, instruction_ptr));
                 instructions.items[split_index].split.right = labels.items.len; // Right side of split is the label that will be generated after all labels/code are generated on the left side.
             }
             try emitLabel(allocator, labels, instruction_ptr);
-            try emitRecursive(allocator, labels, instructions, fixups, alt.parts[alt.parts.len - 1], instruction_ptr, recursion_level + 1);
+            try emitRecursive(allocator, labels, instructions, fixups, alt.parts[alt.parts.len - 1], head_ptr, instruction_ptr, recursion_level + 1);
             try jmp_instructions_indices.append(allocator, try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .jmp = 0 }, instruction_ptr));
             for (0..jmp_instructions_indices.items.len) |i| {
                 instructions.items[jmp_instructions_indices.items[i]].jmp = instructions.items.len; // Have every alternation jump to the end when complete; calculated without a fixup and therefore does not use a label pointer.
@@ -143,7 +146,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                     if (grp.id) |id| {
                         try emitLabel(allocator, labels, instruction_ptr);
                         _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .capture_start = id }, instruction_ptr);
-                        try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                        try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                         try emitLabel(allocator, labels, instruction_ptr);
                         _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .capture_end = id }, instruction_ptr);
                     } else {
@@ -155,25 +158,25 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                         .atomic => {
                             try emitLabel(allocator, labels, instruction_ptr);
                             _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .atomic_start, instruction_ptr);
-                            try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                            try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                             try emitLabel(allocator, labels, instruction_ptr);
                             _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .atomic_end, instruction_ptr);
                         },
                         .generic => {
-                            try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                            try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                         },
                         .lookahead => {
                             if (grp.negated) {
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 const start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .neg_lookahead_start = 0 }, instruction_ptr);
-                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 const end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .neg_lookahead_end, instruction_ptr);
                                 instructions.items[start_index].neg_lookahead_start = end_index;
                             } else {
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .lookahead_start, instruction_ptr);
-                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .lookahead_end, instruction_ptr);
                             }
@@ -182,14 +185,14 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                             if (grp.negated) {
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 const start_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .neg_lookbehind_start = .{ .len = look, .jmp_index = 0 } }, instruction_ptr);
-                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 const end_index = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .neg_lookbehind_end, instruction_ptr);
                                 instructions.items[start_index].neg_lookbehind_start.jmp_index = end_index;
                             } else {
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .lookbehind_start = look }, instruction_ptr);
-                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, instruction_ptr, recursion_level + 1);
+                                try emitRecursive(allocator, labels, instructions, fixups, grp.expr, head_ptr, instruction_ptr, recursion_level + 1);
                                 try emitLabel(allocator, labels, instruction_ptr);
                                 _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .lookbehind_end, instruction_ptr);
                             }
@@ -200,7 +203,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
         },
         .concatenation => |concat| {
             for (0..concat.parts.len) |i| {
-                try emitRecursive(allocator, labels, instructions, fixups, concat.parts[i], instruction_ptr, recursion_level + 1);
+                try emitRecursive(allocator, labels, instructions, fixups, concat.parts[i], head_ptr, instruction_ptr, recursion_level + 1);
             }
         },
         .class => |class_item| {
@@ -220,7 +223,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                     .word => {
                         mask_change_val = ALPHANUM_MASK;
                     },
-                    .word_boundary, .start_anchor, .end_anchor, .any, .backref => {
+                    .word_boundary, .start_anchor, .end_anchor, .any, .backref_id, .backref_name => {
                         return core_types.CodegenError.InvalidClassChild;
                     },
                     .whitespace => {

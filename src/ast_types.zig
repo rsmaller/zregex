@@ -67,7 +67,8 @@ pub const GroupNode = struct {
 pub const AtomNode = struct {
     atom: union(enum) {
         generic: u8,
-        backref: usize, // Refers to a group.
+        backref_id: usize,
+        backref_name: []const u8,
         digit: void,
         word: void,
         word_boundary: void,
@@ -99,8 +100,13 @@ pub const AtomNode = struct {
                     return false;
                 }
             },
-            .backref => |backref| {
-                if (backref != other.atom.backref) {
+            .backref_id => |id| {
+                if (id != other.atom.backref_id) {
+                    return false;
+                }
+            },
+            .backref_name => |name| {
+                if (!std.mem.eql(u8, name, other.atom.backref_name)) {
                     return false;
                 }
             },
@@ -216,7 +222,13 @@ pub const ASTNode = union(enum) {
     }
     pub fn deinit(self: *@This(), allocator: anytype) void {
         switch (self.*) {
-            .atom => {
+            .atom => |atom| {
+                switch(atom.atom) {
+                    .backref_name => |name| {
+                        allocator.free(name);
+                    },
+                    else => {},
+                }
                 allocator.destroy(self);
             },
             .alternation => |alt| {

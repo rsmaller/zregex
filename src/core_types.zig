@@ -87,6 +87,7 @@ pub const AnalysisError = error {
 };
 
 pub const CodegenError = error {
+    InvalidGroupName,
     InvalidClassChild,
     InvalidLiteral,
     UnexpectedBytecodeType,

@@ -347,8 +347,11 @@ fn printAtom(out_interface: anytype, leaf: ast_types.AtomNode) !void { // prints
             }
             try out_interface.print("RANGE(min = {s}, max = {s})\n", .{ buf, buf2 });
         },
-        .backref => |id| {
-            try out_interface.print("BACKREF(id = {d})\n", .{id});
+        .backref_id => |id| {
+            try out_interface.print("BACKREF(id = {d})\n", .{ id });
+        },
+        .backref_name => |name| {
+            try out_interface.print("BACKREF(name = {s})\n", .{ name });
         },
         else => {
             try out_interface.print("LITERAL(item = {s}, negated = {})\n", .{ @tagName(leaf.atom), leaf.inverted });

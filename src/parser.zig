@@ -169,6 +169,7 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
                 const expr = try parseExpr(allocator, str_to_parse, i);
                 result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = true, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
             } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?<")) {
+                std.debug.print("Running named group!\n", .{});
                 i.* += 1; // Consume '?'.
                 const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
                 errdefer allocator.free(name);
@@ -177,7 +178,12 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             } else {
                 lengthThreeLookaheadFound = false;
             }
+        } else if (i.* + 2 >= len) { // If there is a flag start but no room for another character, emit an end of string error.
+            return core_types.ParsingError.EndOfString;
+        } else { // Assume the flag start is invalid.
+            return core_types.ParsingError.TokenNotFound;
         }
+        std.debug.print("Length three lookahead found is {}\n", .{lengthThreeLookaheadFound});
         if (!lengthThreeLookaheadFound and i.* + 1 < len) { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
             if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?=")) {
                 i.* += 2; // consume ?=
@@ -198,12 +204,8 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
             } else { // ? found but no matching flag.
                 return core_types.ParsingError.TokenNotFound;
             }
-        } else if (i.* + 2 >= len) { // If there is a flag start but no room for another character, emit an end of string error.
-            return core_types.ParsingError.EndOfString;
-        } else { // Assume the flag start is invalid.
-            return core_types.ParsingError.TokenNotFound;
-        }
-    } else {
+        } 
+    } else { // If the group found is not marked with ?, parse as normal group.
         const expr = try parseExpr(allocator, str_to_parse, i);
         result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
     }
@@ -352,7 +354,23 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
                 '.' => {
                     atom_result = .{ .atom = .any, .inverted = false };
                 },
-                '0'...'9' => { // Parse a backreference.
+                'k' => {
+                    if (i.* + 1 >= str_to_parse.len or str_to_parse[i.* + 1] != '<') {
+                        return core_types.ParsingError.InvalidGroupName;
+                    }
+                    var z = i.* + 1; // Skip to <, start of name.
+                    const name = try scanner.scanGroupName(str_to_parse, &z);
+                    if (z > i.*) {
+                        i.* = z - 1; // This method can scan backreferences, but it does not parse an entire unit.
+                        // The parser expects a single consumable character after this function is called.
+                    } else {
+                        return core_types.ParsingError.TokenNotFound;
+                    }
+                    const name_alloc = try allocator.dupe(u8, name);
+                    atom_result = .{ .atom = .{ .backref_name = name_alloc, }, .inverted = false };
+ 
+                },
+                '0'...'9' => { // Parse an ID backreference.
                     var z = i.*;
                     const num = try scanner.scanNumeric(str_to_parse, &z);
                     if (z > i.*) {
@@ -361,7 +379,7 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
                     } else {
                         return core_types.ParsingError.TokenNotFound;
                     }
-                    atom_result = .{ .atom = .{ .backref = num }, .inverted = false };
+                    atom_result = .{ .atom = .{ .backref_id = num }, .inverted = false };
                 },
                 '(', ')', '[', ']', '{', '}', '|' => {
                     return core_types.ParsingError.TokenNotFound;
@@ -393,7 +411,7 @@ fn isDefaultMetacharacter(character: u8) bool {
 
 fn isEscapedMetacharacter(character: u8) bool {
     switch (character) {
-        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', '0'...'9' => {
+        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', '0'...'9', 'k' => {
             return true;
         },
         else => {

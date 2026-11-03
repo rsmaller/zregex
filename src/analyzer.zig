@@ -232,7 +232,7 @@ pub fn matchRequirementRange(ast: *const ast_types.ASTNode) core_types.AnalysisE
                 .word_boundary, .start_anchor, .end_anchor => {
                     return repetition_types.RepetitionRangeType{ .min = 0, .max = .{ .bounded = 0 } };
                 },
-                .backref => {
+                .backref_name, .backref_id => {
                     return core_types.AnalysisError.UnknownLength;
                 },
                 else => {
