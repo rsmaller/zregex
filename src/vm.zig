@@ -1,6 +1,7 @@
 const std = @import("std");
 const core_types = @import("core_types.zig");
 const vm_execution_types = @import("vm_execution_types.zig");
+const instruction_types = @import("instruction_types.zig");
 const VMExecutionContext = vm_execution_types.VMExecutionContext;
 
 pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
@@ -19,42 +20,56 @@ pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Patt
     return core_types.Match{ .groups = group_arr, .pattern_ptr = pattern, .allocator = allocator };
 }
 
-pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.Match {
-    var test_start_ptr: usize = 0;
-    var main_context = try VMExecutionContext.init(allocator, test_start_ptr);
-    const bytecode = pattern.bytecode;
-    defer main_context.deinit(allocator); // Should deinit the stack and the groups array.
-    switch (bytecode[0]) {
-        .header_start => {},
+fn match_context_start(allocator: anytype, bytecode: []instruction_types.Instruction, i: *usize) !VMExecutionContext {
+    i.* = 0;
+    var group_alloc: ?[]vm_execution_types.IntermediateMatchGroup = null;
+    errdefer {
+        if (group_alloc) |_| {
+            allocator.free(group_alloc.?);
+        }
+    }
+    switch (bytecode[i.*]) {
+        .header_start => {
+            i.* += 1;
+        },
         else => {
             return core_types.MatchError.BadHeaderScan;
         },
     }
-    var i: usize = 1;
-    while (i < bytecode.len) : (i += 1) {
-        switch (bytecode[i]) {
+    while (i.* < bytecode.len) : (i.* += 1) {
+        switch (bytecode[i.*]) {
             .allocate_groups => |alloc_instr| {
-                if (main_context.groups) |_| {
+                if (group_alloc) |_| {
                     return core_types.MatchError.DuplicateGroupAllocation;
                 } else {
-                    main_context.groups = try allocator.alloc(vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
-                    if (main_context.groups) |grps| {
-                        @memset(grps, .{.start = 0, .end = null});
-                    }
+                    group_alloc = try allocator.alloc(vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
+                    @memset(group_alloc.?, .{.start = 0, .end = null});
                 }
             },
             .header_end => {
-                i += 1; // Skip past header end for VM to use next instruction as the start.
+                i.* += 1; // Skip past header end for VM to use next instruction as the start.
                 break;
             },
             else => {
-                return core_types.MatchError.BadHeaderScan; // bytecode[0] should be alloc_groups instruction.
+                return core_types.MatchError.BadHeaderScan;
             },
         }
     }
-    if (i >= bytecode.len) {
+    if (i.* >= bytecode.len) {
         return core_types.MatchError.BadHeaderScan;
     }
+    const result = try VMExecutionContext.init(allocator, group_alloc orelse {
+        return core_types.MatchError.NoGroupAllocation;
+    }, 0);
+    return result;
+}
+
+pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.Match {
+    var i: usize = 0;
+    const bytecode = pattern.bytecode;
+    var main_context = try match_context_start(allocator, bytecode, &i);
+    defer main_context.deinit(allocator); // Should deinit the stack and the groups array.
+    var test_start_ptr: usize = 0;
     while (test_start_ptr < string.len) : (test_start_ptr += 1) {
         main_context.ip = i; // ensure to reset ip every time. ip index 0 should be the ALLOC_GROUPS() instruction, which is run only once at the start.
         main_context.str_ptr = test_start_ptr;

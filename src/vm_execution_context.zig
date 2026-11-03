@@ -21,11 +21,11 @@ repetition_consumed_input: bool, // Used to stop infinite looping of repetition.
 str_ptr: usize,
 current_group_ptr: ?usize, // the index that points to the current group frame.
 current_rep_ptr: ?usize,
-groups: ?[]IntermediateMatchGroup,
+groups: []IntermediateMatchGroup,
 
 
 // PUBLIC MEMBER FUNCTIONS
-pub fn init(allocator: anytype, start_ptr: usize) !@This() {
+pub fn init(allocator: anytype, groups: []IntermediateMatchGroup, start_ptr: usize) !@This() {
     return .{
         .stack = try MainStack.init(allocator),
         .ip = 0,
@@ -34,15 +34,13 @@ pub fn init(allocator: anytype, start_ptr: usize) !@This() {
         .current_rep_ptr = null,
         .str_ptr = start_ptr,
         .current_group_ptr = null,
-        .groups = null,
+        .groups = groups,
     };
 }
 
 pub fn deinit(self: *@This(), allocator: anytype) void {
     self.stack.deinit(allocator);
-    if (self.groups) |grps| {
-        allocator.free(grps);
-    }
+    allocator.free(self.groups);
 }
 
 pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
@@ -84,11 +82,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 }
             },
             .end_match => {
-                if (self.groups) |grps| {
-                    return IntermediateMatch{ .groups = grps };
-                } else {
-                    return core_types.MatchError.NoGroupAllocation;
-                }
+                return IntermediateMatch{ .groups = self.groups };
             },
             .capture_start => |cap| {
                 try self.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = self.current_group_ptr } });
@@ -268,19 +262,11 @@ fn currentGroupId(self: *@This()) !?usize { // Uses the frame of the current gro
 }
 
 fn currentGroupReference(self: *@This()) !*IntermediateMatchGroup {
-    if (self.groups) |grps| {
-        return &grps[(try self.currentGroupId()).?];
-    } else {
-        return core_types.MatchError.NoGroupAllocation;
-    }
+    return &self.groups[(try self.currentGroupId()).?];
 }
 
 fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
-    if (self.groups) |grps| {
-        return grps[id];
-    } else {
-        return core_types.MatchError.NoGroupAllocation;
-    }
+    return self.groups[id];
 }
 
 // Sets the VM to the next repetition iteration and returns true if the given repetition has incremented the str pointer successfully.
@@ -328,7 +314,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         switch (current_item) {
             .group => |grp| {
                 self.current_group_ptr = grp.previous_group_ptr;
-                self.groups.?[grp.current_group].end = null;
+                self.groups[grp.current_group].end = null;
             },
             .repeat => |rep| {
                 const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
