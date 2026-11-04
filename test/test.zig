@@ -54,7 +54,7 @@ test "fuzz_vm" {
                 return err;
             };
             defer { 
-                if(match) |*mat| mat.deinit(std.testing.allocator);
+                if(match) |*mat| mat.deinit();
             }
         }
     };

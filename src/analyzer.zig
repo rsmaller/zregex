@@ -5,10 +5,11 @@ const repetition_types = @import("repetition_types.zig");
 const type_reflection = @import("type_reflection.zig");
 
 pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedAST {
-    var j: usize = 1;
-    try genericASTAnalyze(ast, &j); // Analysis tree-walks split from trimming to simplify debugging; may be merged at a later date.
+    var current_grp_id: usize = 1;
+    try genericASTAnalyze(ast, &current_grp_id); // Analysis tree-walks split from trimming to simplify debugging; may be merged at a later date.
     try trimAST(allocator, ast);
     var mapping = try mapNames(allocator, ast);
+    try groupIDAnalyze(ast, current_grp_id, mapping);
     errdefer {
         mapping.id_to_name_map.deinit();
         mapping.name_to_id_map.deinit();
@@ -16,7 +17,7 @@ pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedA
     return ast_types.AnalyzedAST{
         .ast = ast,
         .map = mapping,
-        .group_count = j,
+        .group_count = current_grp_id,
         .allocator = allocator,
     };
 }
@@ -91,6 +92,48 @@ fn genericASTAnalyze(ast: *ast_types.ASTNode, id: *usize) !void {
         },
         .class => {
             return;
+        },
+        else => {
+            return;
+        },
+    }
+}
+
+fn groupIDAnalyze(ast: *ast_types.ASTNode, group_count: usize, name_map: core_types.NameIDMap) !void {
+    switch (ast.*) {
+        .group => |grp| { // set ID, increment, and then recurse for group.
+            try groupIDAnalyze(grp.expr, group_count, name_map);
+        }, // outside of group, just recurse.
+        .alternation => |alt| {
+            for (alt.parts) |item| {
+                try groupIDAnalyze(item, group_count, name_map);
+            }
+        },
+        .concatenation => |concat| {
+            for (concat.parts) |item| {
+                try groupIDAnalyze(item, group_count, name_map);
+            }
+        },
+        .repetition => |rep| {
+            try groupIDAnalyze(rep.child, group_count, name_map);
+        },
+        .class => {
+            return;
+        },
+        .atom => |atom| {
+            switch(atom.atom) {
+                .backref_id => |id| {
+                    if (id >= group_count) {
+                        return core_types.AnalysisError.InvalidGroupID;
+                    }
+                },
+                .backref_name => |name| {
+                    if (!name_map.name_to_id_map.contains(name)) {
+                        return core_types.AnalysisError.InvalidGroupName;
+                    }
+                },
+                else => {},
+            } 
         },
         else => {
             return;

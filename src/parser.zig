@@ -169,7 +169,6 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
                 const expr = try parseExpr(allocator, str_to_parse, i);
                 result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = true, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
             } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?<")) {
-                std.debug.print("Running named group!\n", .{});
                 i.* += 1; // Consume '?'.
                 const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
                 errdefer allocator.free(name);
@@ -183,7 +182,6 @@ fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         } else { // Assume the flag start is invalid.
             return core_types.ParsingError.TokenNotFound;
         }
-        std.debug.print("Length three lookahead found is {}\n", .{lengthThreeLookaheadFound});
         if (!lengthThreeLookaheadFound and i.* + 1 < len) { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
             if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?=")) {
                 i.* += 2; // consume ?=

@@ -107,7 +107,7 @@ fn emitRecursive(allocator: anytype, labels: *std.ArrayList(usize), instructions
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id }, instruction_ptr);
                 },
                 .backref_name => |name| {
-                    const id = head_ptr.map.name_to_id_map.get(name) orelse return core_types.CodegenError.InvalidGroupName;
+                    const id = head_ptr.map.name_to_id_map.get(name) orelse return core_types.CodegenError.BadAnalysis;
                     _ = try emitInstruction(allocator, instructions, fixups, .{ .permit_fixups = false }, .{ .backref = id, }, instruction_ptr);
                 },
                 else => {

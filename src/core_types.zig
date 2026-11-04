@@ -84,10 +84,12 @@ pub const AnalysisError = error {
     UnknownLength,
     InvalidRepetition,
     NullGroupID,
+    InvalidGroupName,
+    InvalidGroupID,
 };
 
 pub const CodegenError = error {
-    InvalidGroupName,
+    BadAnalysis, // Reserved for when a state is reached which should not be possible from analysis; i.e. the analyzer malfunctioned somehow.
     InvalidClassChild,
     InvalidLiteral,
     UnexpectedBytecodeType,
