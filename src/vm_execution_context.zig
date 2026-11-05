@@ -87,7 +87,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
             .capture_start => |cap| {
                 try self.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = self.current_group_ptr } });
                 self.current_group_ptr = self.stack.elementCount() - 1; // Top of the stack just pushed to is the group_ptr.
-                (try self.currentGroupReference()).* = .{ .start = self.str_ptr, .end = 0 };
+                (try self.currentGroupReference()).* = .{ .start = self.str_ptr, .end = null }; // End remainds null when match is complete; may be re-set to null during backtrack.
             },
             .capture_end => |id| {
                 (try self.currentGroupReference()).*.end = self.str_ptr;
