@@ -43,7 +43,7 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
     allocator.free(self.groups);
 }
 
-pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
+pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
     while (self.ip < bytecode.len) {
         self.jmp_queued = false;
         switch (bytecode[self.ip]) {
@@ -64,13 +64,13 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 } // repeat_end points to the instruction after the repeat_start, which is the instruction in the context here.
             },
             .repeat_end => |end| {
-                try self.repeat_next_iteration(allocator, end);
+                try self.repeatNextIteration(allocator, end);
             },
             .jmp => |jmp_instr| {
                 self.jmp(jmp_instr);
             },
             .literal => |lit| {
-                const literal_match_container = literal_match(lit, string, self.str_ptr);
+                const literal_match_container = literalMatch(lit, string, self.str_ptr);
                 if (literal_match_container.matching) {
                     if (literal_match_container.consuming) {
                         self.str_ptr += 1;
@@ -188,7 +188,7 @@ pub fn internal_match(self: *@This(), allocator: anytype, bytecode: []instructio
                 }
             },
             .class => |class| {
-                if (class_match(class, string, self.str_ptr)) {
+                if (classMatch(class, string, self.str_ptr)) {
                     self.str_ptr += 1;
                 } else {
                     if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
@@ -270,7 +270,7 @@ fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
 }
 
 // Sets the VM to the next repetition iteration and returns true if the given repetition has incremented the str pointer successfully.
- fn repeat_next_iteration(self: *@This(), allocator: anytype, jump_index: usize) !void {
+ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !void {
     var current_frame_ref: *RepeatStackFrame = undefined;
     if (try self.currentRepFrameReference()) |frame_ref| { // Iterating means the repetition frame should never be null.
         current_frame_ref = frame_ref;
@@ -287,7 +287,7 @@ fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
     };
     if (current_count < min) {
         self.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
-    } else if (repetition_count_cmp(current_count, max, .GE) or !self.repetition_consumed_input) { // Exit if within range and repetition did not consume anything, or if past max.
+    } else if (repetitionCountCmp(current_count, max, .GE) or !self.repetition_consumed_input) { // Exit if within range and repetition did not consume anything, or if past max.
         self.current_rep_ptr = current_frame_ref.previous_rep_ptr; // set to previous rep frame when exiting.
         self.jmp(self.ip + 1);
         self.repetition_consumed_input = true; // Set back to true when exiting to ensure future repetitions do not exit early.
@@ -327,7 +327,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                     },
                     .possessive => { // Exit repetition if within range; otherwise fail the match.
                         self.current_rep_ptr = rep.previous_rep_ptr;
-                        if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
+                        if (repetitionCountCmp(current_count, rep.max, .LE) and current_count >= rep.min) {
                             self.jmp(rep.escape_jmp_index);
                             return true;
                         } else {
@@ -367,7 +367,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
 
 // PRIVATE NON-MEMBER FUNCTIONS AND PRIVATE TYPES
 // Private function for count comparison.
-fn repetition_count_cmp(count: usize, max: repetition_types.RepetitionBoundType, cmp: ComparisonType) bool {
+fn repetitionCountCmp(count: usize, max: repetition_types.RepetitionBoundType, cmp: ComparisonType) bool {
     switch (max) {
         .bounded => |bounded_max| {
             switch (cmp) {
@@ -401,7 +401,7 @@ fn repetition_count_cmp(count: usize, max: repetition_types.RepetitionBoundType,
     }
 }
 
-fn literal_match(literal: anytype, string: []const u8, index: usize) ConditionalConsumingMatch {
+fn literalMatch(literal: anytype, string: []const u8, index: usize) ConditionalConsumingMatch {
     if (index > string.len) { // Not >=. == string.len is sometimes used for certain assertions.
         return .{ .matching = false, .consuming = false };
     }
@@ -457,7 +457,7 @@ fn literal_match(literal: anytype, string: []const u8, index: usize) Conditional
     return .{ .matching = matching, .consuming = consuming };
 }
 
-fn class_match(class: u256, string: []const u8, index: usize) bool {
+fn classMatch(class: u256, string: []const u8, index: usize) bool {
     if (index >= string.len) {
         return false;
     }

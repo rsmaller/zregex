@@ -4,7 +4,7 @@ const vm_execution_types = @import("vm_execution_types.zig");
 const instruction_types = @import("instruction_types.zig");
 const VMExecutionContext = vm_execution_types.VMExecutionContext;
 
-pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
+pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
         if (group.end) |non_null_end| {
@@ -20,7 +20,7 @@ pub fn match_index_correlate(allocator: anytype, pattern: *const core_types.Patt
     return core_types.Match{ .groups = group_arr, .pattern_ptr = pattern, .allocator = allocator };
 }
 
-fn match_context_start(allocator: anytype, bytecode: []instruction_types.Instruction, i: *usize) !VMExecutionContext {
+fn matchContextStart(allocator: anytype, bytecode: []instruction_types.Instruction, i: *usize) !VMExecutionContext {
     i.* = 0;
     var group_alloc: ?[]vm_execution_types.IntermediateMatchGroup = null;
     errdefer {
@@ -67,16 +67,16 @@ fn match_context_start(allocator: anytype, bytecode: []instruction_types.Instruc
 pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.Match {
     var i: usize = 0;
     const bytecode = pattern.bytecode;
-    var main_context = try match_context_start(allocator, bytecode, &i);
+    var main_context = try matchContextStart(allocator, bytecode, &i);
     defer main_context.deinit(allocator); // Should deinit the stack and the groups array.
     var test_start_ptr: usize = 0;
     while (test_start_ptr < string.len) : (test_start_ptr += 1) {
         main_context.ip = i; // ensure to reset ip every time. ip index 0 should be the ALLOC_GROUPS() instruction, which is run only once at the start.
         main_context.str_ptr = test_start_ptr;
         main_context.current_group_ptr = null;
-        const current_match = try main_context.internal_match(allocator, bytecode, string);
+        const current_match = try main_context.internalMatch(allocator, bytecode, string);
         if (current_match) |success| { // check the match value for null
-            return try match_index_correlate(allocator, pattern, string, success);
+            return try matchIndexCorrelate(allocator, pattern, string, success);
         }
     }
     return null;

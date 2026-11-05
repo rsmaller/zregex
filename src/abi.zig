@@ -1,4 +1,5 @@
 // Frontend for zregex dynamic lib containing CABI-compatible functions which call the zregex main library functions.
+// The functions in this file are all snake case to match C naming conventions.
 // The zregex module can itself be imported into a zig program as well.
 const std = @import("std");
 const zregex = @import("zregex");
@@ -10,10 +11,10 @@ const ZigCIO = union(enum) {
     },
     c: struct {
         out_file: *c_headers.FILE,
-        callback_fn: *const fn(*const anyopaque, usize, usize, *c_headers.FILE) callconv(.c) usize,
+        callbackFn: *const fn(*const anyopaque, usize, usize, *c_headers.FILE) callconv(.c) usize,
     },
     python: struct {
-        callback_fn: *const fn([*]const u8, usize) callconv(.c) usize, // callback is never called with null-termed strings.
+        callbackFn: *const fn([*]const u8, usize) callconv(.c) usize, // callback is never called with null-termed strings.
     },
     pub fn print(self: *const @This(), comptime fmt: []const u8, args: anytype) !void {
         switch (self.*) {
@@ -22,12 +23,12 @@ const ZigCIO = union(enum) {
             },
             .c => |c_io| {
                 const buf = try std.fmt.allocPrint(allocator, fmt, args);
-                _ = c_io.callback_fn(@ptrCast(buf.ptr), @sizeOf(u8), buf.len, c_io.out_file);
+                _ = c_io.callbackFn(@ptrCast(buf.ptr), @sizeOf(u8), buf.len, c_io.out_file);
                 allocator.free(buf);
             },
             .python => |py_io| {
                 const buf = try std.fmt.allocPrint(allocator, fmt, args);
-                _ = py_io.callback_fn(@ptrCast(buf.ptr), buf.len);
+                _ = py_io.callbackFn(@ptrCast(buf.ptr), buf.len);
                 allocator.free(buf);
             }
         }
@@ -58,12 +59,12 @@ pub export fn zregex_init_zig(io_handle: *std.Io.Writer) callconv(.c) void { // 
     io_ref = .{.zig = .{ .io = io_handle } };
 }
 
-pub export fn zregex_init_c(io_handle: *c_headers.FILE, callback_fn: *anyopaque) callconv(.c) void {
-    io_ref = .{.c = .{ .out_file = io_handle, .callback_fn = @alignCast(@ptrCast(callback_fn)) } };
+pub export fn zregex_init_c(io_handle: *c_headers.FILE, callbackFn: *anyopaque) callconv(.c) void {
+    io_ref = .{.c = .{ .out_file = io_handle, .callbackFn = @alignCast(@ptrCast(callbackFn)) } };
 }
 
-pub export fn zregex_init_python(callback_fn: *anyopaque) callconv(.c) void {
-    io_ref = .{.python = .{.callback_fn = @alignCast(@ptrCast(callback_fn)) } };
+pub export fn zregex_init_python(callbackFn: *anyopaque) callconv(.c) void {
+    io_ref = .{.python = .{.callbackFn = @alignCast(@ptrCast(callbackFn)) } };
 }
 
 pub export fn zregex_print_test() callconv(.c) void {
