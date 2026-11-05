@@ -17,9 +17,13 @@ class InternalMatch(Structure): # typedef struct match in header.
 class ASTPrintOptions(Structure):
     _fields_ = [ ("show_match_width", c_bool) ]
 
-def CStyleOptional(type): # Returns a zig struct optional type.
+ZRegexCallbackFn = CFUNCTYPE(None, POINTER(c_char), c_size_t) # cannot use c_char_p due to null termination.
+
+# True internal functions.
+
+def __c_style_optional_type(item_type): # Returns a zig struct optional type.
     class ClassToReturn(Structure):
-        _fields_ = [ ("value", type) , ("present", c_bool) ]
+        _fields_ = [ ("value", item_type) , ("present", c_bool) ]
         def unpack(self):
             if not self.present:
                 return None
@@ -27,11 +31,7 @@ def CStyleOptional(type): # Returns a zig struct optional type.
                 return self.value
     return ClassToReturn
 
-ZRegexCallbackFn = CFUNCTYPE(None, POINTER(c_char), c_size_t) # cannot use c_char_p due to null termination.
-
-# True internal functions.
-
-def _zig_io_callback_fn(string, length: c_size_t):
+def __zig_io_callback_fn(string, length: c_size_t):
     to_print = str(string_at(string, int(length)).decode('utf-8'))
     sys.stdout.write(to_print)
     sys.stdout.flush()
@@ -41,7 +41,7 @@ def _zig_io_callback_fn(string, length: c_size_t):
 def to_c_str_internal(string):
     return c_char_p(string.encode('utf-8'))
 
-callback_internal = ZRegexCallbackFn(_zig_io_callback_fn) # Store in global scope so that the function isn't garbage collected.
+callback_internal = ZRegexCallbackFn(__zig_io_callback_fn) # Store in global scope so that the function isn't garbage collected.
 callback_internal.argtypes = [c_char_p, c_size_t] # Here to match format of other decls.
 callback_internal.restype = None
 
@@ -87,7 +87,7 @@ id_index_internal.restype = c_char_p
 
 name_to_id_internal = zregex_dylib.zregex_name_to_id
 name_to_id_internal.argtypes = [c_void_p, c_char_p]
-name_to_id_internal.restype = CStyleOptional(c_size_t)
+name_to_id_internal.restype = __c_style_optional_type(c_size_t)
 
 id_to_name_internal = zregex_dylib.zregex_id_to_name
 id_to_name_internal.argtypes = [c_void_p, c_size_t]

@@ -1,4 +1,3 @@
-from ctypes import *
 from .zregex import *
 
 class Match:
@@ -13,11 +12,11 @@ class Match:
         elif isinstance(key, str):
             if self.__pattern is None:
                 return None
-            id = name_to_id_internal(self.__pattern, to_c_str_internal(key)).unpack()
-            if id is None:
+            item_id = name_to_id_internal(self.__pattern, to_c_str_internal(key)).unpack()
+            if item_id is None:
                 return None
             else:
-                return self.groups[id]
+                return self.groups[item_id]
         else:
             raise Exception("Invalid value passed to get item method!")
     @property
@@ -36,21 +35,17 @@ class Pattern:
     def name_to_id(self, name: str): # Unpacks optional ID struct to a value or None.
         if self is None:
             return None
-        id = name_to_id_internal(self.__pattern, to_c_str_internal(name)).unpack()
-        if id is None:
+        return name_to_id_internal(self.__pattern, to_c_str_internal(name)).unpack()
+    def id_to_name(self, item_id: int):
+        if self.__pattern is None or item_id is None:
             return None
-        else:
-            return id
-    def id_to_name(self, id: int):
-        if self.__pattern is None:
-            return None
-        if id < 0:
+        if item_id < 0:
             raise Exception("Group ID must be a valid unsigned value")
-        name: c_char_p = id_to_name_internal(self.__pattern, id)
+        name: c_char_p = id_to_name_internal(self.__pattern, item_id)
         if name is not None:
-            return name.decode('utf-8')
+            return bytes(name).decode('utf-8')
         else:
-            return name
+            return None
     def match(self, string: str):
         item = zregex.match_internal(self.__pattern, to_c_str_internal(string))
         if item is None:
@@ -69,7 +64,7 @@ class Pattern:
 def init(): # Hooks into _callback defined below.
     zregex.init_internal(zregex.callback_internal)
 
-def compile(string: str):
+def compile(string: str): # noqa
     ret = zregex.compile_internal(zregex.to_c_str_internal(string))
     if ret is None:
         raise Exception("Unable to compile target string")
