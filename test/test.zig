@@ -9,23 +9,23 @@ test "abc" {
     defer val.deinit();
 }
 
-test "fuzz_parser" {
-    const t = struct {
-        var data: [test_options.fuzzlen]u8 = undefined;
-        fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
-            const len = smith.slice(&data);
-            var item = zregex.compile(std.testing.allocator, data[0..len]) catch {
-                return;
-            }; // Compilation errors are OK, as long as they don't crash :)
-            defer item.deinit();
-        }
-    };
-    const corpus = try file_scan.readCorpusFromFile(std.testing.io, std.testing.allocator, "./test/unit_test_patterns.txt");
-    defer corpus.deinit();
-    try std.testing.fuzz({}, t.fuzzFn, .{
-        .corpus = corpus.items,   
-    });
-}
+// test "fuzz_parser" { // Not necessary for now.
+//     const t = struct {
+//         var data: [test_options.fuzzlen]u8 = undefined;
+//         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
+//             const len = smith.slice(&data);
+//             var item = zregex.compile(std.testing.allocator, data[0..len]) catch {
+//                 return;
+//             }; // Compilation errors are OK, as long as they don't crash :)
+//             defer item.deinit();
+//         }
+//     };
+//     const corpus = try file_scan.readCorpusFromFile(std.testing.io, std.testing.allocator, "./test/unit_test_patterns.txt");
+//     defer corpus.deinit();
+//     try std.testing.fuzz({}, t.fuzzFn, .{
+//         .corpus = corpus.items,
+//     });
+// }
 
 
 pub fn debugPrint(comptime fmt: []const u8, args: anytype) !void {

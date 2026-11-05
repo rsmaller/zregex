@@ -318,7 +318,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
             },
             .repeat => |rep| {
                 const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
-                    switch (rep.mode) {
+                switch (rep.mode) {
                     .greedy => {
                         self.current_rep_ptr = rep.previous_rep_ptr;
                     },
@@ -326,6 +326,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                         self.current_rep_ptr = rep.previous_rep_ptr;
                     },
                     .possessive => { // Exit repetition if within range; otherwise fail the match.
+                        self.current_rep_ptr = rep.previous_rep_ptr;
                         if (repetition_count_cmp(current_count, rep.max, .LE) and current_count >= rep.min) {
                             self.jmp(rep.escape_jmp_index);
                             return true;
