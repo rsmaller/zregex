@@ -44,7 +44,7 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
 }
 
 pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
-    while (self.ip < bytecode.len and self.str_ptr < string.len) {
+    while (self.ip < bytecode.len) {
         self.jmp_queued = false;
         switch (bytecode[self.ip]) {
             .allocate_groups, .header_start, .header_end => { // This should only be done once per higher-level call to the VM, at bytecode index 0.
