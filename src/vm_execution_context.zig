@@ -315,7 +315,12 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         switch (current_item) {
             .group => |grp| {
                 self.current_group_ptr = grp.previous_group_ptr;
-                self.groups[grp.current_group].end = null;
+                if (self.current_group_ptr) |_| {
+                    self.groups[try self.currentGroupId()].end = null; // set the previous group slice to null.
+                } else {
+                    return core_types.MatchError.InvalidStackFrameMemberAccess;
+                }
+                self.groups[grp.current_group].end = null; // set the current group's slice to null.
             },
             .repeat => |rep| {
                 const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
