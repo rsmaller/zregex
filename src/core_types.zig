@@ -77,6 +77,7 @@ pub const ParsingError = error {
     InvalidRange,
     VariableLookbehindRange,
     InvalidGroupName,
+    NonAsciiString,
 };
 
 

@@ -48,10 +48,17 @@ test "fuzz_vm" {
             }; // Compilation errors are OK, as long as they don't crash :)
             defer item.deinit();
             var match = item.match(std.testing.allocator, data2[0..len2]) catch |err| {
-                std.debug.print("{s}\n", .{data1});
-                zregex.printBytecode(FudgeIOStruct{}, item);
-                std.debug.print("Error encountered: {s}\n", .{@errorName(err)});
-                return err;
+                switch(err) {
+                    core_types.ParsingError.NonAsciiString => {
+                        return;
+                    },
+                    else => {
+                        std.debug.print("{s}\n", .{data1});
+                        zregex.printBytecode(FudgeIOStruct{}, item);
+                        std.debug.print("Error encountered: {s}\n", .{@errorName(err)});
+                        return err;
+                    },
+                }
             };
             defer { 
                 if(match) |*mat| mat.deinit();

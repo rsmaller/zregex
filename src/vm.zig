@@ -2,6 +2,7 @@ const std = @import("std");
 const core_types = @import("core_types.zig");
 const vm_execution_types = @import("vm_execution_types.zig");
 const instruction_types = @import("instruction_types.zig");
+const ascii_assertion = @import("ascii_assertion.zig");
 const VMExecutionContext = vm_execution_types.VMExecutionContext;
 
 pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
@@ -65,6 +66,7 @@ fn matchContextStart(allocator: anytype, bytecode: []instruction_types.Instructi
 }
 
 pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8) !?core_types.Match {
+    try ascii_assertion.assert_ascii_string(string);
     var i: usize = 0;
     const bytecode = pattern.bytecode;
     var main_context = try matchContextStart(allocator, bytecode, &i);

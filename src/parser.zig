@@ -1,5 +1,6 @@
 const std = @import("std");
 const zregex = @import("root.zig");
+const ascii_assertion = @import("ascii_assertion.zig");
 const type_reflection = @import("type_reflection.zig");
 const core_types = @import("core_types.zig");
 const repetition_types = @import("repetition_types.zig");
@@ -9,6 +10,7 @@ const scanner = @import("scanner.zig");
 var EPSILON_UNIT: ast_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
 
 pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) !*ast_types.ASTNode {
+    try ascii_assertion.assert_ascii_string(str_to_parse);
     var i: usize = 0;
     var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, str_to_parse, &i)) else &EPSILON_UNIT;
     errdefer {
