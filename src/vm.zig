@@ -9,6 +9,9 @@ pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Patter
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
         if (group.end) |non_null_end| {
+            if (group.start > non_null_end) {
+                return core_types.MatchError.InvalidStackFrameMemberAccess;
+            }
             const string_slice = string[group.start..non_null_end];
             const allocation = try allocator.allocSentinel(u8, string_slice.len, 0);
             @memcpy(allocation[0..string_slice.len], string_slice);

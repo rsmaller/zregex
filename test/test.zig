@@ -43,7 +43,8 @@ test "fuzz_vm" {
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len1 = smith.slice(&data1);
             const len2 = smith.slice(&data2);
-            var item = zregex.compile(std.testing.allocator, data1[0..len1]) catch {
+            var item = zregex.compile(std.testing.allocator, data1[0..len1]) catch  {
+                // std.debug.print("Parse error encountered: {s}\n", .{@errorName(err)});
                 return;
             }; // Compilation errors are OK, as long as they don't crash :)
             defer item.deinit();
@@ -53,9 +54,10 @@ test "fuzz_vm" {
                         return;
                     },
                     else => {
-                        std.debug.print("{s}\n", .{data1});
+                        std.debug.print("Pattern: {s}\n", .{data1});
+                        std.debug.print("Match string: {s}\n", .{data2});
                         zregex.printBytecode(FudgeIOStruct{}, item);
-                        std.debug.print("Error encountered: {s}\n", .{@errorName(err)});
+                        std.debug.print("Match error encountered: {s}\n", .{@errorName(err)});
                         return err;
                     },
                 }

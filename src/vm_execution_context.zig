@@ -44,7 +44,7 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
 }
 
 pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
-    while (self.ip < bytecode.len) {
+    while (self.ip < bytecode.len and self.str_ptr < string.len) {
         self.jmp_queued = false;
         switch (bytecode[self.ip]) {
             .allocate_groups, .header_start, .header_end => { // This should only be done once per higher-level call to the VM, at bytecode index 0.
@@ -87,7 +87,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
             .capture_start => |cap| {
                 try self.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = self.current_group_ptr } });
                 self.current_group_ptr = self.stack.elementCount() - 1; // Top of the stack just pushed to is the group_ptr.
-                (try self.currentGroupReference()).* = .{ .start = self.str_ptr, .end = null }; // End remainds null when match is complete; may be re-set to null during backtrack.
+                (try self.currentGroupReference()).* = .{ .start = self.str_ptr, .end = null }; // End remainds null until match is complete; may be re-set to null during backtrack.
             },
             .capture_end => |id| {
                 (try self.currentGroupReference()).*.end = self.str_ptr;
@@ -95,7 +95,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 const old_group_ptr = self.current_group_ptr;
                 self.current_group_ptr = group_frame.previous_group_ptr;
                 if (id != 0) { // Push a backtrack-within frame if not ending the global group.
-                    try self.stack.push(allocator, .{ .group = .{ .current_group = (try self.currentGroupId()).?, .previous_group_ptr = old_group_ptr } });
+                    try self.stack.push(allocator, .{ .group = .{ .current_group = (try self.currentGroupId()), .previous_group_ptr = old_group_ptr } });
                 }
             },
             .atomic_start => {
@@ -247,7 +247,8 @@ fn currentCount(self: *@This()) !?usize {
 }
 
 fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of the frame representing the current group.
-    switch (try self.stack.fetchAtIndex(self.current_group_ptr.?)) {
+    const frame = try self.stack.fetchAtIndex(self.current_group_ptr orelse return core_types.MatchError.InvalidStackFrameMemberAccess);
+    switch (frame) {
         .group => |grp| {
             return grp;
         },
@@ -257,12 +258,12 @@ fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of 
     }
 }
 
-fn currentGroupId(self: *@This()) !?usize { // Uses the frame of the current group to grab the current group ID.
+fn currentGroupId(self: *@This()) !usize { // Uses the frame of the current group to grab the current group ID.
     return (try self.currentGroupFrame()).current_group;
 }
 
 fn currentGroupReference(self: *@This()) !*IntermediateMatchGroup {
-    return &self.groups[(try self.currentGroupId()).?];
+    return &self.groups[(try self.currentGroupId())];
 }
 
 fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {

@@ -46,10 +46,7 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     try result_list.append(allocator, currentTerm);
     while (i.* < len and str_to_parse[i.*] == '|') { // Parse through pipes as arguments.
         i.* += 1;
-        if (i.* >= len) {
-            break;
-        }
-        if (str_to_parse[i.*] == ')') { // Handle epsilon as the last alternation argument.
+        if (i.* >= len or str_to_parse[i.*] == ')') { // Handle epsilon as the last alternation argument.
             try result_list.append(allocator, &EPSILON_UNIT);
             break;
         }
