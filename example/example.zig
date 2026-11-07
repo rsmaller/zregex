@@ -9,11 +9,11 @@ pub fn main(init: std.process.Init) !void {
     var fixed_alloc_buffer: [fixed_alloc_buffer_size]u8 = undefined;
     var AllocatorBackend = if (debug_enabled) std.heap.DebugAllocator(.{}){} else std.heap.FixedBufferAllocator.init(&fixed_alloc_buffer); // Use heap in debug mode and stack array for allocation in optimized mode.
     const allocator = AllocatorBackend.allocator();
-    //defer {
-        //if (comptime zregex.type_reflection.declExists(@TypeOf(AllocatorBackend), "deinit", std.builtin.Type.Fn)) {
-          //  _ = AllocatorBackend.deinit();
-        //}
-    //}
+    defer {
+        if (comptime zregex.type_reflection.declExists(@TypeOf(AllocatorBackend), "deinit", std.builtin.Type.Fn)) {
+            _ = AllocatorBackend.deinit();
+        }
+    }
     std.debug.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});
     std.debug.print("Size of fixed alloc buffer: {d}\n", .{fixed_alloc_buffer.len});
 

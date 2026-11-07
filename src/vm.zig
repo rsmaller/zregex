@@ -85,6 +85,7 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
         main_context.current_group_ptr = null;
         const current_match = try main_context.internalMatch(allocator, bytecode, string);
         if (current_match) |success| { // check the match value for null
+            defer success.deinit(allocator);
             return try matchIndexCorrelate(allocator, pattern, string, success);
         }
     }

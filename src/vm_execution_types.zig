@@ -7,6 +7,9 @@ pub const VMExecutionContext = @import("vm_execution_context.zig"); // Execution
 
 pub const IntermediateMatch = struct { // Intermediary representation of matches before they are returned to the user.
     groups: []const IntermediateMatchGroup,
+    pub fn deinit(self: *const @This(), allocator: anytype) void {
+        allocator.free(self.groups);
+    }
 };
 
 pub const IntermediateMatchGroup = struct {

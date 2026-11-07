@@ -41,6 +41,9 @@ pub fn init(allocator: anytype, groups: []vm_execution_types.Stack(IntermediateM
 
 pub fn deinit(self: *@This(), allocator: anytype) void {
     self.stack.deinit(allocator);
+    for (self.groups) |*stack| {
+        stack.deinit(allocator);
+    }
     allocator.free(self.groups);
 }
 
