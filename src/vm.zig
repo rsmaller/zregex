@@ -5,6 +5,7 @@ const instruction_types = @import("instruction_types.zig");
 const ascii_assertion = @import("ascii_assertion.zig");
 const VMExecutionContext = vm_execution_types.VMExecutionContext;
 
+/// Assign groups as part of intermediate matches to a polished match object for the VM to return on a successful match.
 pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
@@ -24,9 +25,10 @@ pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Patter
     return core_types.Match{ .groups = group_arr, .pattern_ptr = pattern, .allocator = allocator };
 }
 
+/// Read the header of bytecode and do initial setup for the VM context.
 fn matchContextStart(allocator: anytype, bytecode: []instruction_types.Instruction, i: *usize) !VMExecutionContext {
     i.* = 0;
-    var group_alloc: ?[]vm_execution_types.IntermediateMatchGroup = null;
+    var group_alloc: ?[]vm_execution_types.Stack(vm_execution_types.IntermediateMatchGroup) = null;
     errdefer {
         if (group_alloc) |_| {
             allocator.free(group_alloc.?);
@@ -46,8 +48,10 @@ fn matchContextStart(allocator: anytype, bytecode: []instruction_types.Instructi
                 if (group_alloc) |_| {
                     return core_types.MatchError.DuplicateGroupAllocation;
                 } else {
-                    group_alloc = try allocator.alloc(vm_execution_types.IntermediateMatchGroup, alloc_instr.size);
-                    @memset(group_alloc.?, .{.start = 0, .end = null});
+                    group_alloc = try allocator.alloc(vm_execution_types.Stack(vm_execution_types.IntermediateMatchGroup), alloc_instr.size);
+                    for (0..group_alloc.?.len) |j| {
+                        group_alloc.?[j] = try .init(allocator);
+                    }
                 }
             },
             .header_end => {

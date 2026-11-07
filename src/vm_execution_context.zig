@@ -9,7 +9,8 @@ const repetition_types = @import("repetition_types.zig");
 // VM stack re-namespacing for brevity.
 const MainStack = vm_execution_types.MainStack;
 const RepeatStackFrame = vm_execution_types.RepeatStackFrame;
-const GroupStackFrame = vm_execution_types.GroupStackFrame;
+const GroupStartStackFrame = vm_execution_types.GroupStartStackFrame;
+const GroupEndStackFrame = vm_execution_types.GroupEndStackFrame;
 const IntermediateMatchGroup = vm_execution_types.IntermediateMatchGroup;
 const IntermediateMatch = vm_execution_types.IntermediateMatch;
 
@@ -21,11 +22,11 @@ repetition_consumed_input: bool, // Used to stop infinite looping of repetition.
 str_ptr: usize,
 current_group_ptr: ?usize, // the index that points to the current group frame.
 current_rep_ptr: ?usize,
-groups: []IntermediateMatchGroup,
+groups: []vm_execution_types.Stack(IntermediateMatchGroup),
 
 
 // PUBLIC MEMBER FUNCTIONS
-pub fn init(allocator: anytype, groups: []IntermediateMatchGroup, start_ptr: usize) !@This() {
+pub fn init(allocator: anytype, groups: []vm_execution_types.Stack(IntermediateMatchGroup), start_ptr: usize) !@This() {
     return .{
         .stack = try MainStack.init(allocator),
         .ip = 0,
@@ -82,20 +83,24 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 }
             },
             .end_match => {
-                return IntermediateMatch{ .groups = self.groups };
+                var group_items = try allocator.alloc(IntermediateMatchGroup, self.groups.len);
+                for (self.groups, 0..) |group_stack, i| {
+                   group_items[i] = try group_stack.peek(); 
+                }
+                return IntermediateMatch{ .groups = group_items };
             },
             .capture_start => |cap| {
-                try self.stack.push(allocator, .{ .group = .{ .current_group = cap, .previous_group_ptr = self.current_group_ptr } });
+                try self.stack.push(allocator, .{ .group_start = .{ .current_group = cap, .previous_group_ptr = self.current_group_ptr } });
                 self.current_group_ptr = self.stack.elementCount() - 1; // Top of the stack just pushed to is the group_ptr.
-                (try self.currentGroupReference()).* = .{ .start = self.str_ptr, .end = null }; // End remainds null until match is complete; may be re-set to null during backtrack.
+                try (try self.currentGroupReference()).*.push(allocator, .{ .start = self.str_ptr, .end = null }); // End remainds null until match is complete; may be re-set to null during backtrack or completely popped depending on state of VM.
             },
             .capture_end => |id| {
-                (try self.currentGroupReference()).*.end = self.str_ptr;
+                (try (try self.currentGroupReference()).peekPtr()).end = self.str_ptr;
                 const group_frame = try self.currentGroupFrame();
                 const old_group_ptr = self.current_group_ptr;
                 self.current_group_ptr = group_frame.previous_group_ptr;
                 if (id != 0) { // Push a backtrack-within frame if not ending the global group.
-                    try self.stack.push(allocator, .{ .group = .{ .current_group = (try self.currentGroupId()), .previous_group_ptr = old_group_ptr } });
+                    try self.stack.push(allocator, .{ .group_end = .{ .ending_group = try self.currentGroupId(), .previous_group_ptr = old_group_ptr } });
                 }
             },
             .atomic_start => {
@@ -197,8 +202,9 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 }
             },
             .backref => |id| {
-                const group_compare_slice = try self.groupIndex(id);
-                if (group_compare_slice.end) |end| {
+                const group_compare_slice = try (try self.groupIndex(id)).peek();
+                const end_nullable = group_compare_slice.end;
+                if (end_nullable) |end| {
                     const len: usize = end - group_compare_slice.start;
                     if (std.mem.eql(u8, string[group_compare_slice.start..end], string[self.str_ptr..])) {
                         self.str_ptr += len;
@@ -245,11 +251,11 @@ fn currentCount(self: *@This()) !?usize {
         return null;
     }
 }
-
-fn currentGroupFrame(self: *@This()) !GroupStackFrame { // Returns the value of the frame representing the current group.
+ 
+fn currentGroupFrame(self: *@This()) !GroupStartStackFrame { // Returns the value of the frame representing the current group.
     const frame = try self.stack.fetchAtIndex(self.current_group_ptr orelse return core_types.MatchError.InvalidStackFrameMemberAccess);
     switch (frame) {
-        .group => |grp| {
+        .group_start => |grp| {
             return grp;
         },
         else => {
@@ -262,11 +268,11 @@ fn currentGroupId(self: *@This()) !usize { // Uses the frame of the current grou
     return (try self.currentGroupFrame()).current_group;
 }
 
-fn currentGroupReference(self: *@This()) !*IntermediateMatchGroup {
+fn currentGroupReference(self: *@This()) !*vm_execution_types.Stack(IntermediateMatchGroup) {
     return &self.groups[(try self.currentGroupId())];
 }
 
-fn groupIndex(self: *@This(), id: usize) !IntermediateMatchGroup {
+fn groupIndex(self: *@This(), id: usize) !vm_execution_types.Stack(IntermediateMatchGroup) {
     return self.groups[id];
 }
 
@@ -313,14 +319,17 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
     while (self.stack.hasItem()) {
         const current_item = try self.stack.pop(allocator);
         switch (current_item) {
-            .group => |grp| {
+            .group_start => |grp| { // Backtracking outside of a group, meaning the group's entire match is void.
                 self.current_group_ptr = grp.previous_group_ptr;
                 if (self.current_group_ptr) |_| {
-                    self.groups[try self.currentGroupId()].end = null; // set the previous group slice to null.
+                    try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back. 
                 } else {
                     return core_types.MatchError.InvalidStackFrameMemberAccess;
                 }
-                self.groups[grp.current_group].end = null; // set the current group's slice to null.
+            },
+            .group_end => |grp| {
+                self.current_group_ptr = grp.previous_group_ptr;
+                (try self.groups[grp.ending_group].peekPtr()).end = null; // Only set the most recent match's end to null; try re-matching from the same start point.
             },
             .repeat => |rep| {
                 const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.

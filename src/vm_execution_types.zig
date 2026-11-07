@@ -32,9 +32,14 @@ pub const ChoicePointStackFrame = struct {
     previous_rep_ptr: ?usize,
 };
 
-pub const GroupStackFrame = struct {
+pub const GroupStartStackFrame = struct {
     current_group: usize,
     previous_group_ptr: ?usize, // the index that points to the previous group frame.
+};
+
+pub const GroupEndStackFrame = struct {
+    ending_group: usize,
+    previous_group_ptr: ?usize,
 };
 
 pub const LookaheadStackFrame = struct {
@@ -46,7 +51,8 @@ pub const LookaheadStackFrame = struct {
 pub const StackFrame = union(enum) {
     choice_point: ChoicePointStackFrame,
     repeat: RepeatStackFrame,
-    group: GroupStackFrame,
+    group_start: GroupStartStackFrame,
+    group_end: GroupEndStackFrame,
     lookahead: LookaheadStackFrame,
     atomic: void, // doesn't have to do anything for now.
 };
@@ -88,11 +94,20 @@ pub fn Stack(T: type) type {
             }
             return ret;
         }
-        pub fn peek(self: *@This()) !T {
-            if (!self.hasItem()) {
+        pub fn trimTop(self: *@This(), allocator: anytype) !void {
+            _ = try self.pop(allocator);
+        }
+        pub fn peek(self: *const @This()) !T {
+            if (self.size == 0) {
                 return core_types.MatchError.EmptyStack;
             }
-            return self.data[self.size - 1];
+            return try self.fetchAtIndex(self.size - 1);
+        }
+        pub fn peekPtr(self: *@This()) !*T {
+            if (self.size == 0) {
+                return core_types.MatchError.EmptyStack;
+            }
+            return try self.fetchPtrAtIndex(self.size - 1);
         }
         pub fn fetchPtrAtIndex(self: *@This(), index: usize) !*T {
             if (index >= self.size) {
@@ -100,8 +115,11 @@ pub fn Stack(T: type) type {
             }
             return &self.data[index];
         }
-        pub fn fetchAtIndex(self: *@This(), index: usize) !T {
-            return (try self.fetchPtrAtIndex(index)).*;
+        pub fn fetchAtIndex(self: *const @This(), index: usize) !T {
+            if (index >= self.size) {
+                return core_types.MatchError.OutOfBoundsStack;
+            }
+            return self.data[index];
         }
         pub fn hasItem(self: *@This()) bool {
             return self.size > 0;
