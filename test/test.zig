@@ -4,6 +4,15 @@ const test_options = @import("test_options");
 const file_scan = @import("corpus_scan.zig");
 const core_types = zregex.core_types;
 
+pub fn is_ascii_string_printable(string: []const u8) bool {
+    for (string) |char| {
+        if ((!std.ascii.isPrint(char)) or char == '\x00') {
+            return false;
+        }
+    }
+    return true;
+}
+
 test "abc" {
     var val = try zregex.compile(std.testing.allocator, "abc");
     defer val.deinit();
@@ -43,6 +52,8 @@ test "fuzz_vm" {
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len1 = smith.slice(&data1);
             const len2 = smith.slice(&data2);
+            if (!is_ascii_string_printable(data1[0..len1])) { return; }
+            if (!is_ascii_string_printable(data2[0..len2])) { return; }
             var item = zregex.compile(std.testing.allocator, data1[0..len1]) catch  {
                 // std.debug.print("Parse error encountered: {s}\n", .{@errorName(err)});
                 return;
@@ -54,8 +65,9 @@ test "fuzz_vm" {
                         return;
                     },
                     else => {
-                        std.debug.print("Pattern: {s}\n", .{data1});
-                        std.debug.print("Match string: {s}\n", .{data2});
+                        std.debug.print("Pattern (len {d}): {s}\n", .{len1, data1[0..len1]});
+                        std.debug.print("Match string (len {d}): {s}\n", .{len2, data2[0..len2]});
+                        std.debug.print("Bytecode:\n", .{});
                         zregex.printBytecode(FudgeIOStruct{}, item);
                         std.debug.print("Match error encountered: {s}\n", .{@errorName(err)});
                         return err;

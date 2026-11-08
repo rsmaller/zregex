@@ -87,6 +87,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
             },
             .end_match => {
                 var group_items = try allocator.alloc(IntermediateMatchGroup, self.groups.len);
+                errdefer allocator.free(group_items);
                 for (self.groups, 0..) |group_stack, i| {
                    group_items[i] = try group_stack.peek(); 
                 }

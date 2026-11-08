@@ -24,7 +24,9 @@ pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedA
 
 fn mapNames(allocator: anytype, ast: *ast_types.ASTNode) !core_types.NameIDMap {
     var name_to_id_map = std.StringHashMap(usize).init(allocator);
+    errdefer name_to_id_map.deinit();
     var id_to_name_map = std.AutoHashMap(usize, []const u8).init(allocator);
+    errdefer id_to_name_map.deinit();
     try mapNamesRecursive(allocator, &name_to_id_map, &id_to_name_map, ast);
     return .{ .name_to_id_map = name_to_id_map, .id_to_name_map = id_to_name_map, .allocator = allocator, };
 }
@@ -45,8 +47,13 @@ fn mapNamesRecursive(allocator: anytype, name_to_id_map: *std.StringHashMap(usiz
             if (grp.name) |name| {
                 if (grp.id) |id| {
                     const name_alloc = try allocator.dupe(u8, name); // Both hashmaps will share the same memory for keys/values.
-                    try name_to_id_map.put(name_alloc, id);
-                    try id_to_name_map.put(id, name_alloc);
+                    errdefer allocator.free(name_alloc);
+                    if (!(try name_to_id_map.getOrPut(name_alloc)).found_existing) {
+                        try name_to_id_map.put(name_alloc, id);
+                        try id_to_name_map.put(id, name_alloc);
+                    } else {
+                        return core_types.AnalysisError.DuplicateGroupName;
+                    }
                 } else {
                     return core_types.AnalysisError.NullGroupID;
                 }

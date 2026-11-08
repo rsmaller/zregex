@@ -32,6 +32,7 @@ pub fn main(init: std.process.Init) !void {
     try stdout.print("\nBytecode:\n", .{});
     cabi.zregex_print_bytecode(compiled_pattern);
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});
+    try stdout.flush();
     const my_match = cabi.zregex_match(compiled_pattern, string_to_match);
     defer {
         if (my_match != null) {

@@ -34,9 +34,11 @@ pub fn main(init: std.process.Init) !void {
     defer compiled_pattern.deinit();
     try stdout.print("AST:\n", .{});
     zregex.printAST(stdout, compiled_pattern, .{ .show_match_width = true });
+    try stdout.flush();
     try stdout.print("\nBytecode:\n", .{});
     zregex.printBytecode(stdout, compiled_pattern);
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});
+    try stdout.flush();
     var my_match = try compiled_pattern.match(allocator, string_to_match);
     defer {
         if (my_match) |_| {

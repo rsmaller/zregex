@@ -87,6 +87,7 @@ pub const AnalysisError = error {
     NullGroupID,
     InvalidGroupName,
     InvalidGroupID,
+    DuplicateGroupName,
 };
 
 pub const CodegenError = error {
