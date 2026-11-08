@@ -107,7 +107,6 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             return result;
         }
     }
-    var metacharacter: bool = undefined;
     var escaped: bool = false;
     if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
         i.* += 1; // Consume backslash.
@@ -115,10 +114,8 @@ fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror
             return core_types.ParsingError.EndOfString;
         }
         escaped = true;
-        metacharacter = isEscapedMetacharacter(str_to_parse[i.*]);
-    } else {
-        metacharacter = isDefaultMetacharacter(str_to_parse[i.*]);
     }
+    const metacharacter = isMetaCharacter(str_to_parse[i.*], escaped);
     var char_to_set: u8 = str_to_parse[i.*]; // Grab character and set value based on escape sequence.
     if (escaped) {
         switch (str_to_parse[i.*]) {
@@ -382,7 +379,6 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
             }
         },
         false => {
-            std.debug.print("char is not meta: {c}\n", .{char_to_set});
             atom_result = .{ .atom = .{ .generic = char_to_set }, .inverted = false };
         },
     }
@@ -391,7 +387,15 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
     return result;
 }
 
-fn isDefaultMetacharacter(character: u8) bool {
+fn isMetaCharacter(character: u8, escaped: bool) bool {
+    if (escaped) {
+        return isEscapedMetacharacter(character);
+    } else {
+        return isNonEscapedMetacharacter(character);
+    }
+}
+
+fn isNonEscapedMetacharacter(character: u8) bool {
     switch (character) {
         '$', '^', '.', '[', ']', '(', ')', '{', '}', '*', '+', '|', '?' => {
             return true;
