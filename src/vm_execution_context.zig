@@ -324,9 +324,9 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         const current_item = try self.stack.pop(allocator);
         switch (current_item) {
             .group_start => |grp| { // Backtracking outside of a group, meaning the group's entire match is void.
-                self.current_group_ptr = grp.previous_group_ptr;
                 if (self.current_group_ptr) |_| {
                     try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back. 
+                    self.current_group_ptr = grp.previous_group_ptr;
                 } else {
                     return core_types.MatchError.InvalidStackFrameMemberAccess;
                 }
