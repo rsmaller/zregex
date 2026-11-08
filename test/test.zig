@@ -36,15 +36,6 @@ test "abc" {
 //     });
 // }
 
-
-pub fn debugPrint(comptime fmt: []const u8, args: anytype) !void {
-    std.debug.print(fmt, args);
-}
-
-const FudgeIOStruct = struct {
-    print: @TypeOf(debugPrint) = debugPrint,
-};
-
 test "fuzz_vm" {
     const t = struct {
         var data1: [test_options.fuzzlen]u8 = undefined;
@@ -68,7 +59,7 @@ test "fuzz_vm" {
                         std.debug.print("Pattern (len {d}): \"{s}\"\n", .{len1, data1[0..len1]});
                         std.debug.print("Match string (len {d}): \"{s}\"\n", .{len2, data2[0..len2]});
                         std.debug.print("Bytecode:\n", .{});
-                        zregex.printBytecode(FudgeIOStruct{}, item);
+                        zregex.printBytecode(zregex.printing.VirutalDebugIOStruct{}, item);
                         std.debug.print("Match error encountered: {s}\n", .{@errorName(err)});
                         return err;
                     },

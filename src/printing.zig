@@ -4,6 +4,20 @@ const core_types = @import("core_types.zig");
 const ast_types = @import("ast_types.zig");
 const instruction_types = @import("instruction_types.zig");
 
+fn debugPrint(comptime fmt: []const u8, args: anytype) !void {
+    std.debug.print(fmt, args);
+}
+
+fn debugFlush() !void {
+
+}
+
+// A fake IO handle that has print() and flush() to debug print.
+pub const VirutalDebugIOStruct = struct {
+    print: @TypeOf(debugPrint) = debugPrint,
+    flush: @TypeOf(debugFlush) = debugFlush,
+};
+
 pub fn printBytecode(out_interface: anytype, pattern: core_types.Pattern) void {
     const bytecode: []instruction_types.Instruction = pattern.bytecode;
     for (0..bytecode.len) |i| {

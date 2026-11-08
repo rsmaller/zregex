@@ -23,10 +23,11 @@ str_ptr: usize,
 current_group_ptr: ?usize, // the index that points to the current group frame.
 current_rep_ptr: ?usize,
 groups: []vm_execution_types.Stack(IntermediateMatchGroup),
+string: []const u8,
 
 
 // PUBLIC MEMBER FUNCTIONS
-pub fn init(allocator: anytype, groups: []vm_execution_types.Stack(IntermediateMatchGroup), start_ptr: usize) !@This() {
+pub fn init(allocator: anytype, string: []const u8, groups: []vm_execution_types.Stack(IntermediateMatchGroup), start_ptr: usize) !@This() {
     return .{
         .stack = try MainStack.init(allocator),
         .ip = 0,
@@ -36,6 +37,7 @@ pub fn init(allocator: anytype, groups: []vm_execution_types.Stack(IntermediateM
         .str_ptr = start_ptr,
         .current_group_ptr = null,
         .groups = groups,
+        .string = string,
     };
 }
 
@@ -45,6 +47,22 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
         stack.deinit(allocator);
     }
     allocator.free(self.groups);
+}
+
+pub fn incrementStrPtr(self: *@This(), amount: usize) !void {
+    if (self.str_ptr >= self.string.len) {
+        return core_types.MatchError.InvalidMatchIndexRange;
+    } else {
+        self.str_ptr += amount;
+    }
+}
+
+pub fn setStrPtr(self: *@This(), ptr: usize) !void {
+    if (ptr > self.string.len) {
+        return core_types.MatchError.InvalidMatchIndexRange;
+    } else {
+        self.str_ptr = ptr;
+    }
 }
 
 pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
@@ -77,7 +95,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 const literal_match_container = literalMatch(lit, string, self.str_ptr);
                 if (literal_match_container.matching) {
                     if (literal_match_container.consuming) {
-                        self.str_ptr += 1;
+                        try self.incrementStrPtr(1);
                     }
                 } else {
                     if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
@@ -99,6 +117,9 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 try (try self.currentGroupReference()).*.push(allocator, .{ .start = self.str_ptr, .end = null }); // End remainds null until match is complete; may be re-set to null during backtrack or completely popped depending on state of VM.
             },
             .capture_end => |id| {
+                if (self.str_ptr > string.len) {
+                    return core_types.MatchError.InvalidMatchIndexRange;
+                }
                 (try (try self.currentGroupReference()).peekPtr()).end = self.str_ptr;
                 const group_frame = try self.currentGroupFrame();
                 const old_group_ptr = self.current_group_ptr;
@@ -135,7 +156,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                     const current = try self.stack.pop(allocator);
                     switch (current) {
                         .lookahead => |look| {
-                            self.str_ptr = look.saved_str_ptr;
+                            try self.setStrPtr(look.saved_str_ptr);
                             lookahead_frame_found = true;
                             break; // Breaks out of the while loop when the frame is found.
                         },
@@ -149,7 +170,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
             .lookbehind_start => |len| {
                 try self.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = self.str_ptr, .negative = false, .jmp_index = null } });
                 if (self.str_ptr >= len) {
-                    self.str_ptr -= len;
+                    try self.setStrPtr(self.str_ptr - len);
                 } else {
                     if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
@@ -162,7 +183,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                     const current = try self.stack.pop(allocator);
                     switch (current) {
                         .lookahead => |look| {
-                            self.str_ptr = look.saved_str_ptr;
+                            try self.setStrPtr(look.saved_str_ptr);
                             lookahead_frame_found = true;
                             break; // Breaks out of the while loop when the frame is found.
                         },
@@ -178,13 +199,13 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
             },
             .neg_lookahead_end => { // if this is reached that means the inside matched, which means the assertion failed, so backtrack.
                 if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = false })) {
-                return null;
-            }
+                    return null;
+                }
             },
             .neg_lookbehind_start => |neg_lookbehind| {
                 try self.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = self.str_ptr, .negative = true, .jmp_index = neg_lookbehind.jmp_index } });
                 if (self.str_ptr >= neg_lookbehind.len) {
-                    self.str_ptr -= neg_lookbehind.len;
+                    try self.setStrPtr(self.str_ptr - neg_lookbehind.len);
                 } else {
                     if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
@@ -198,7 +219,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
             },
             .class => |class| {
                 if (classMatch(class, string, self.str_ptr)) {
-                    self.str_ptr += 1;
+                    try self.incrementStrPtr(1);
                 } else {
                     if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                         return null;
@@ -211,7 +232,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 if (end_nullable) |end| {
                     const len: usize = end - group_compare_slice.start;
                     if (std.mem.eql(u8, string[group_compare_slice.start..end], string[self.str_ptr..])) {
-                        self.str_ptr += len;
+                        try self.incrementStrPtr(len);
                     } else {
                         if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                             return null;
@@ -281,7 +302,7 @@ fn groupIndex(self: *@This(), id: usize) !vm_execution_types.Stack(IntermediateM
 }
 
 // Sets the VM to the next repetition iteration and returns true if the given repetition has incremented the str pointer successfully.
- fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !void {
+fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !void {
     var current_frame_ref: *RepeatStackFrame = undefined;
     if (try self.currentRepFrameReference()) |frame_ref| { // Iterating means the repetition frame should never be null.
         current_frame_ref = frame_ref;
@@ -356,7 +377,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                 }
             },
             .choice_point => |choice| {
-                self.str_ptr = choice.backtrack_str_ptr;
+                try self.setStrPtr(choice.backtrack_str_ptr);
                 self.current_rep_ptr = choice.previous_rep_ptr;
                 if (try self.currentRepFrameReference()) |frame_ref| { // Don't null error if there is no frame; there may be no current counter.
                     frame_ref.current_count = choice.previous_count;
@@ -367,7 +388,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
             .lookahead => |look| {
                 if (look.negative and options.allow_across_lookthroughs) {
                     if (look.jmp_index) |look_jmp_index| {
-                        self.str_ptr = look.saved_str_ptr;
+                        try self.setStrPtr(look.saved_str_ptr);
                         self.jmp(look_jmp_index + 1);
                         return true; // did NOT incur a failing state.
                     } else {
@@ -420,14 +441,22 @@ fn repetitionCountCmp(count: usize, max: repetition_types.RepetitionBoundType, c
     }
 }
 
-fn literalMatch(literal: anytype, string: []const u8, index: usize) ConditionalConsumingMatch {
+fn literalMatch(literal: instruction_types.LiteralInstruction, string: []const u8, index: usize) ConditionalConsumingMatch {
     if (index > string.len) { // Not >=. == string.len is sometimes used for certain assertions.
         return .{ .matching = false, .consuming = false };
+    }
+    if (index == string.len) {
+        switch(literal.data) {
+            .generic, .digit, .word, .whitespace, .any => {
+                return .{ .matching = false, .consuming = false }; // Failsafe to not try input consumption on string end.
+            },
+            else => {},
+        }
     }
     var matching = false;
     var consuming = true;
     switch (literal.data) {
-        .generic => |gen| {
+        .generic => |gen| { // Consuming inputs.
             if (index >= string.len) {
                 matching = false;
             } else {
@@ -440,7 +469,14 @@ fn literalMatch(literal: anytype, string: []const u8, index: usize) ConditionalC
         .word => {
             matching = isWord(string, index);
         },
-        .word_boundary => {
+        .whitespace => {
+            matching = isWhitespace(string, index);
+        },
+        .any => {
+            matching = true;
+            if (index >= string.len or string[index] == '\n') matching = false;
+        },
+        .word_boundary => { // Non-consuming inputs. Should be moved to bytecode itself, during analysis/codegen.
             if (index == 0 and index >= string.len) {
                 matching = false;
             } else if (index == 0) {
@@ -454,9 +490,6 @@ fn literalMatch(literal: anytype, string: []const u8, index: usize) ConditionalC
             }
             consuming = false;
         },
-        .whitespace => {
-            matching = isWhitespace(string, index);
-        },
         .start_anchor => { // Start and end anchors default to multiline matching.
             matching = index == 0 or string[index - 1] == '\n';
             consuming = false;
@@ -464,10 +497,6 @@ fn literalMatch(literal: anytype, string: []const u8, index: usize) ConditionalC
         .end_anchor => {
             matching = index == string.len or ((index + 1) < string.len and string[index + 1] == '\n');
             consuming = false;
-        },
-        .any => {
-            matching = true;
-            if (index >= string.len or string[index] == '\n') matching = false;
         },
     }
     if (literal.inverted) {

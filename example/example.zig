@@ -21,9 +21,10 @@ pub fn main(init: std.process.Init) !void {
         @panic("Please provide a string and pattern!");
     }
 
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
-    const stdout = &stdout_writer.interface;
+    // var stdout_buffer: [1024]u8 = undefined;
+    // var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    // const stdout = &stdout_writer.interface;
+    const stdout = zregex.printing.VirutalDebugIOStruct{};
     const string_to_match = args[1]; //"john.doe@gmail.com";
     const pattern = args[2];
     try stdout.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});

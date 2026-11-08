@@ -10,8 +10,9 @@ pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Patter
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
     for (match_item.groups, 0..) |group, i| {
         if (group.end) |non_null_end| {
-            if (group.start > non_null_end) {
-                return core_types.MatchError.InvalidStackFrameMemberAccess;
+            if (group.start > non_null_end or group.start >= string.len or non_null_end > string.len) { // End can be equal to string.len if match slices to the very end of string.
+                std.debug.print("Strlen: {d}, start: {d}, end: {d}\n", .{string.len, group.start, non_null_end});
+                return core_types.MatchError.InvalidMatchIndexRange;
             }
             const string_slice = string[group.start..non_null_end];
             const allocation = try allocator.allocSentinel(u8, string_slice.len, 0);
@@ -26,7 +27,7 @@ pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Patter
 }
 
 /// Read the header of bytecode and do initial setup for the VM context.
-fn matchContextStart(allocator: anytype, bytecode: []instruction_types.Instruction, i: *usize) !VMExecutionContext {
+fn matchContextStart(allocator: anytype, string: []const u8, bytecode: []instruction_types.Instruction, i: *usize) !VMExecutionContext {
     i.* = 0;
     var group_alloc: ?[]vm_execution_types.Stack(vm_execution_types.IntermediateMatchGroup) = null;
     errdefer {
@@ -66,7 +67,7 @@ fn matchContextStart(allocator: anytype, bytecode: []instruction_types.Instructi
     if (i.* >= bytecode.len) {
         return core_types.MatchError.BadHeaderScan;
     }
-    const result = try VMExecutionContext.init(allocator, group_alloc orelse {
+    const result = try VMExecutionContext.init(allocator, string, group_alloc orelse {
         return core_types.MatchError.NoGroupAllocation;
     }, 0);
     return result;
@@ -76,7 +77,7 @@ pub fn match(allocator: anytype, pattern: *const core_types.Pattern, string: []c
     try ascii_assertion.assert_ascii_string(string);
     var i: usize = 0;
     const bytecode = pattern.bytecode;
-    var main_context = try matchContextStart(allocator, bytecode, &i);
+    var main_context = try matchContextStart(allocator, string, bytecode, &i);
     defer main_context.deinit(allocator); // Should deinit the stack and the groups array.
     var test_start_ptr: usize = 0;
     while (test_start_ptr < string.len) : (test_start_ptr += 1) {

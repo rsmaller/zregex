@@ -2,7 +2,7 @@ const std = @import("std");
 const analyzer = @import("analyzer.zig");
 const parser = @import("parser.zig");
 const codegen = @import("codegen.zig");
-const printing = @import("printing.zig");
+pub const printing = @import("printing.zig");
 pub const type_reflection = @import("type_reflection.zig"); // Provided to the end user for declaration checks; they are useful!
 pub const core_types = @import("core_types.zig"); // The only type interface to be exposed to the user.
 

@@ -108,5 +108,6 @@ pub const MatchError = error {
     NullStackFrame,
     InvalidStackFrameMemberAccess,
     MissingStartFrame,
+    InvalidMatchIndexRange,
 };
 
