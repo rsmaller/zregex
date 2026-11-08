@@ -43,7 +43,7 @@ pub fn scanGroupName(str_to_scan: []const u8, i: *usize) ![]const u8 {
     return name;
 }
 
-/// Tokenizes character classes with '-' syntax awareness.
+/// Tokenizes character classes with '-' syntax awareness. Consumes up to the last relevant character.
 pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
     var escaped: bool = false;
     const len: usize = str_to_scan.len;
@@ -113,7 +113,7 @@ pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
     if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') { // Range syntax.
         if (i.* + 2 < len and str_to_scan[i.* + 2] == ']') { // Return so that '-' is interpreted as a character at the end.
             return .{ .atom = .{ .generic = char_to_set }, .inverted = false };
-    }
+        }
         i.* += 2; // Skip past current item and -.
         if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
@@ -138,7 +138,7 @@ pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
                     char_to_set2 = '\r';
                 },
                 ']' => {},
-                'b', 'B', 'd', 'D', 's', 'S', 'w', 'W' => { // Characters not allowed in ranges or at all.
+                'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', 'k', 'A', 'Z' => { // Characters not allowed in ranges or at all.
                     return core_types.ParsingError.TokenNotFound;
                 },
                 else => {},
@@ -175,9 +175,28 @@ pub fn scanHaveCharacter(str_to_scan: []const u8, i: *usize, character: u8) bool
     return result;
 }
 
+/// Scans the escaping backslash; merely a specialization of scanHaveCharacter.
+pub fn scanHaveEscape(str_to_scan: []const u8, i: *usize) bool {
+    return scanHaveCharacter(str_to_scan, i, '\\');
+}
+
+/// Looks at the current character to see if it has been escaped; therefore it looks backwards.
+pub fn scanSeeIsEscaped(str_to_scan: []const u8, i: *usize) bool {
+    return i.* > 0 and str_to_scan[i.* - 1] == '\\';
+}
+
 /// Consumes a character in the input string and errors if it is not present.
 pub fn scanConsumeCharacter(str_to_scan: []const u8, i: *usize, character: u8) !void {
     if (!scanHaveCharacter(str_to_scan, i, character)) {
         return core_types.ParsingError.TokenNotFound;
+    }
+}
+
+/// Consumes any single character in the input string and errors if the slice pointer is at the end.
+pub fn scanConsumeAnyCharacter(str_to_scan: []const u8, i: *usize) !void {
+    if (i.* < str_to_scan.len) {
+        i.* += 1;
+    } else {
+        return core_types.ParsingError.EndOfString;
     }
 }

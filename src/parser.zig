@@ -219,18 +219,17 @@ fn parseCharCLass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
         result_list.deinit(allocator);
     }
     var negated: bool = false;
-    if (str_to_parse[i.*] == '^') { // handle ^ negation edge case for first part char class.
+    if (scanner.scanHaveCharacter(str_to_parse, i, '^')) { // handle ^ negation edge case for first part char class.
         negated = true;
-        i.* += 1;
         if (i.* >= str_to_parse.len) {
             return core_types.ParsingError.EndOfString;
         }
     }
     var item: ast_types.AtomNode = undefined;
-    while (i.* < str_to_parse.len and (str_to_parse[i.*] != ']' or str_to_parse[i.* - 1] == '\\')) { // Parse until ending brace, excluding ending braces escaped with backslash.
+    while (i.* < str_to_parse.len and (!scanner.scanSeeCharacter(str_to_parse, i, ']') or scanner.scanSeeIsEscaped(str_to_parse, i))) { // Parse until ending brace, excluding ending braces escaped with backslash.
         item = try scanner.scanClassAtom(str_to_parse, i); // Parse the first item in the class.
+        try scanner.scanConsumeAnyCharacter(str_to_parse, i); // Consume the last character scanned in scanClassAtom.
         try result_list.append(allocator, item);
-        i.* += 1;
     }
     if (i.* >= str_to_parse.len) {
         return core_types.ParsingError.EndOfString;
