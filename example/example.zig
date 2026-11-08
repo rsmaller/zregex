@@ -14,8 +14,6 @@ pub fn main(init: std.process.Init) !void {
             _ = AllocatorBackend.deinit();
         }
     }
-    std.debug.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});
-    std.debug.print("Size of fixed alloc buffer: {d}\n", .{fixed_alloc_buffer.len});
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     defer init.arena.allocator().free(args);
@@ -28,6 +26,8 @@ pub fn main(init: std.process.Init) !void {
     const stdout = &stdout_writer.interface;
     const string_to_match = args[1]; //"john.doe@gmail.com";
     const pattern = args[2];
+    try stdout.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});
+    try stdout.print("Size of fixed alloc buffer: {d}\n", .{fixed_alloc_buffer.len});
     try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern }); // So string and pattern print before errors.
     try stdout.flush();
     var compiled_pattern = try zregex.compile(allocator, pattern);

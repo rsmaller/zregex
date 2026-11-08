@@ -303,6 +303,7 @@ fn printAtom(out_interface: anytype, leaf: ast_types.AtomNode) !void { // prints
     switch (leaf.atom) {
         .generic => |gen_leaf| {
             var buf: [2]u8 = undefined;
+            var buf_len: usize = 2;
             if (gen_leaf == '\n') {
                 buf[0] = '\\';
                 buf[1] = 'n';
@@ -315,8 +316,9 @@ fn printAtom(out_interface: anytype, leaf: ast_types.AtomNode) !void { // prints
             } else {
                 buf[0] = gen_leaf;
                 buf[1] = 0;
+                buf_len = 1;
             }
-            try out_interface.print("LITERAL(char = {s})\n", .{buf});
+            try out_interface.print("LITERAL(char = {s})\n", .{buf[0..buf_len]});
         },
         .range => |range| {
             var buf: [2]u8 = undefined;

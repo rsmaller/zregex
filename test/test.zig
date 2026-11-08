@@ -65,8 +65,8 @@ test "fuzz_vm" {
                         return;
                     },
                     else => {
-                        std.debug.print("Pattern (len {d}): {s}\n", .{len1, data1[0..len1]});
-                        std.debug.print("Match string (len {d}): {s}\n", .{len2, data2[0..len2]});
+                        std.debug.print("Pattern (len {d}): \"{s}\"\n", .{len1, data1[0..len1]});
+                        std.debug.print("Match string (len {d}): \"{s}\"\n", .{len2, data2[0..len2]});
                         std.debug.print("Bytecode:\n", .{});
                         zregex.printBytecode(FudgeIOStruct{}, item);
                         std.debug.print("Match error encountered: {s}\n", .{@errorName(err)});
