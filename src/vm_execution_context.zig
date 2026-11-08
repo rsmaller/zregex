@@ -345,11 +345,12 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         const current_item = try self.stack.pop(allocator);
         switch (current_item) {
             .group_start => |grp| { // Backtracking outside of a group, meaning the group's entire match is void.
-                if (self.current_group_ptr) |_| {
-                    try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back. 
+                if (grp.previous_group_ptr) |_| {
+                    // std.debug.print("Popping grp {d}\n", .{grp.current_group});
+                    try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back.
                     self.current_group_ptr = grp.previous_group_ptr;
-                } else {
-                    return core_types.MatchError.InvalidStackFrameMemberAccess;
+                } else { // This branch can be reached when no choice points are pushed and a backtrack occurs.
+                    return false; // If resetting group ptr to null, match 0 failed so the whole match failed.
                 }
             },
             .group_end => |grp| {

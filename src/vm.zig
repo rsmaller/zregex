@@ -8,17 +8,30 @@ const VMExecutionContext = vm_execution_types.VMExecutionContext;
 /// Assign groups as part of intermediate matches to a polished match object for the VM to return on a successful match.
 pub fn matchIndexCorrelate(allocator: anytype, pattern: *const core_types.Pattern, string: []const u8, match_item: vm_execution_types.IntermediateMatch) !core_types.Match {
     var group_arr = try allocator.alloc(?[:0]const u8, match_item.groups.len);
+    @memset(group_arr[0..group_arr.len], null);
+    errdefer {
+        for (0..group_arr.len) |i| {
+            if (group_arr[i]) |item| {
+                allocator.free(item);
+            }
+        }
+        allocator.free(group_arr);
+    }
     for (match_item.groups, 0..) |group, i| {
         if (group.end) |non_null_end| {
-            if (group.start > non_null_end or group.start >= string.len or non_null_end > string.len) { // End can be equal to string.len if match slices to the very end of string.
-                std.debug.print("Strlen: {d}, start: {d}, end: {d}\n", .{string.len, group.start, non_null_end});
+            if (group.end == group.start) { // Handle length 0 groups separately because they can appear outside the end string.
+                const allocation = try allocator.allocSentinel(u8, 0, 0);
+                group_arr[i] = allocation;
+            } else if (group.start > non_null_end or group.start >= string.len or non_null_end > string.len) { // End can be equal to string.len if match slices to the very end of string.
+                std.debug.print("Group {d}:: Strlen: {d}, start: {d}, end: {d}\n", .{i, string.len, group.start, non_null_end});
                 return core_types.MatchError.InvalidMatchIndexRange;
+            } else {
+                const string_slice = string[group.start..non_null_end];
+                const allocation = try allocator.allocSentinel(u8, string_slice.len, 0);
+                @memcpy(allocation[0..string_slice.len], string_slice);
+                allocation[string_slice.len] = 0;
+                group_arr[i] = allocation[0..string_slice.len :0];
             }
-            const string_slice = string[group.start..non_null_end];
-            const allocation = try allocator.allocSentinel(u8, string_slice.len, 0);
-            @memcpy(allocation[0..string_slice.len], string_slice);
-            allocation[string_slice.len] = 0;
-            group_arr[i] = allocation[0..string_slice.len :0];
         } else {
             group_arr[i] = null;
         }
