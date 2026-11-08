@@ -342,10 +342,10 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
                 'B' => {
                     atom_result = .{ .atom = .word_boundary, .inverted = true };
                 },
-                '^' => {
+                '^', 'A' => {
                     atom_result = .{ .atom = .start_anchor, .inverted = false };
                 },
-                '$' => {
+                '$', 'Z' => {
                     atom_result = .{ .atom = .end_anchor, .inverted = false };
                 },
                 '.' => {
@@ -378,7 +378,7 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
                     }
                     atom_result = .{ .atom = .{ .backref_id = num }, .inverted = false };
                 },
-                '(', ')', '[', ']', '{', '}', '|' => {
+                '(', ')', '[', ']', '{', '}', '|', '+', '*', '?' => {
                     return core_types.ParsingError.TokenNotFound;
                 },
                 else => {
@@ -387,6 +387,7 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
             }
         },
         false => {
+            std.debug.print("char is not meta: {c}\n", .{char_to_set});
             atom_result = .{ .atom = .{ .generic = char_to_set }, .inverted = false };
         },
     }
@@ -408,7 +409,7 @@ fn isDefaultMetacharacter(character: u8) bool {
 
 fn isEscapedMetacharacter(character: u8) bool {
     switch (character) {
-        'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', '0'...'9', 'k' => {
+        'A', 'b', 'B', 'd', 'D', 'k', 's', 'S', 'w', 'W', 'Z', '0'...'9' => {
             return true;
         },
         else => {
