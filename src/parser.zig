@@ -253,23 +253,23 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
     var repetition_container: repetition_types.RepetitionRangeType = undefined;
     switch (str_to_parse[i.*]) {
         '*' => {
+            try scanner.scanConsumeCharacter(str_to_parse, i, '*');
             repetition_container = .{ .min = 0, .max = .unbounded };
-            i.* += 1;
         },
         '+' => {
+            try scanner.scanConsumeCharacter(str_to_parse, i, '+');
             repetition_container = .{ .min = 1, .max = .unbounded };
-            i.* += 1;
         },
         '?' => {
+            try scanner.scanConsumeCharacter(str_to_parse, i, '?');
             repetition_container = .{ .min = 0, .max = .{ .bounded = 1 } };
-            i.* += 1;
         },
         '{' => { // Permissive parsing on {,}
-            i.* += 1; // Skip past curly brace.
+            try scanner.scanConsumeCharacter(str_to_parse, i, '{');
             if (i.* >= str_to_parse.len) {
                 return core_types.ParsingError.EndOfString;
             }
-            if (str_to_parse[i.*] == ',') { // If no number is present before the , then the min is 0.
+            if (scanner.scanSeeCharacter(str_to_parse, i, ',')) { // If no number is present before the , then the min is 0.
                 count_min = 0;
             } else {
                 count_min = try scanner.scanNumeric(str_to_parse, i);
@@ -277,36 +277,31 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
                     return core_types.ParsingError.EndOfString;
                 }
             }
-            if (str_to_parse[i.*] != ',') { // If comma is not encountered, it is one number so min and max should be the same.
+            if (!scanner.scanSeeCharacter(str_to_parse, i, ',')) { // If comma is not encountered, it is one number so min and max should be the same.
                 count_max = .{ .bounded = count_min };
             } else {
-                i.* += 1;
+                try scanner.scanConsumeCharacter(str_to_parse, i, ',');
                 if (i.* >= str_to_parse.len) {
                     return core_types.ParsingError.EndOfString;
                 }
-                if (str_to_parse[i.*] == '}') { // If comma is encountered but no ending number is found, then max is the largest possible int.
+                if (scanner.scanHaveCharacter(str_to_parse, i, '}')) { // If comma is encountered but no ending number is found, then max is the largest possible int.
                     count_max = .unbounded;
                 } else {
                     count_max = .{ .bounded = try scanner.scanNumeric(str_to_parse, i) };
+                    try scanner.scanConsumeCharacter(str_to_parse, i, '}');
                 }
             }
-            if (i.* >= str_to_parse.len or str_to_parse[i.*] != '}') {
-                return core_types.ParsingError.TokenNotFound;
-            }
             repetition_container = .{ .min = count_min, .max = count_max };
-            i.* += 1;
         },
         else => { // If no quantifier is found, do not wrap in repetition.
             return atom;
         },
     }
     var rep_type: repetition_types.RepeaterType = .greedy;
-    if (i.* < str_to_parse.len and str_to_parse[i.*] == '+') {
+    if (scanner.scanHaveCharacter(str_to_parse, i, '+')) {
         rep_type = .possessive;
-        i.* += 1; // Consume the possessive +.
-    } else if (i.* < str_to_parse.len and str_to_parse[i.*] == '?') {
+    } else if (scanner.scanHaveCharacter(str_to_parse, i, '?')) {
         rep_type = .lazy;
-        i.* += 1; // Consume the lazy ?.
     }
     const atom_parent = try allocator.create(ast_types.ASTNode); // Construct repetition node and wrap atom in it.
     atom_parent.* = .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } };

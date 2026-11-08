@@ -6,6 +6,9 @@ const ast_types = @import("ast_types.zig");
 
 /// Scans through the string and grabs a numeric component as a size value.
 pub fn scanNumeric(str_to_scan: []const u8, i: *usize) !usize {
+    if (str_to_scan[i.*] < '0' or str_to_scan[i.*] > '9') {
+        return core_types.ParsingError.TokenNotFound;
+    }
     const num_slice_len = i.* + (std.mem.indexOfNone(u8, str_to_scan[i.*..], "0123456789") orelse str_to_scan.len - i.*); // Grab the index where the numeric component of string ends.
     const number = try std.fmt.parseUnsigned(usize, str_to_scan[i.*..num_slice_len], 10); // Slice through numeric component and grab int value.
     i.* = num_slice_len;
@@ -154,4 +157,27 @@ pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
         return .{ .atom = .{ .range = .{ .character_min = char_to_set, .character_max = char_to_set2 } }, .inverted = false }; // If range is found, make range node.
     }
     return .{ .atom = .{ .generic = char_to_set }, .inverted = false };
+}
+
+
+// The scanning functions that are used for parser branching.
+/// Returns a boolean representing whether a character is present in the input string.
+pub fn scanSeeCharacter(str_to_scan: []const u8, i: *usize, character: u8) bool {
+    return i.* < str_to_scan.len and str_to_scan[i.*] == character;
+}
+
+/// Returns a boolean representing whether a character is present in the input string and increments past the character if present.
+pub fn scanHaveCharacter(str_to_scan: []const u8, i: *usize, character: u8) bool {
+    const result = scanSeeCharacter(str_to_scan, i, character);
+    if (result) {
+        i.* += 1; // Consume character.
+    }
+    return result;
+}
+
+/// Consumes a character in the input string and errors if it is not present.
+pub fn scanConsumeCharacter(str_to_scan: []const u8, i: *usize, character: u8) !void {
+    if (!scanHaveCharacter(str_to_scan, i, character)) {
+        return core_types.ParsingError.TokenNotFound;
+    }
 }
