@@ -89,7 +89,7 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 var group_items = try allocator.alloc(IntermediateMatchGroup, self.groups.len);
                 errdefer allocator.free(group_items);
                 for (self.groups, 0..) |group_stack, i| {
-                   group_items[i] = try group_stack.peek(); 
+                       group_items[i] = group_stack.peek() catch .{ .start = 0, .end = null}; // If no stack frame is present in the group, the group is null, so return a bogus null-end value.
                 }
                 return IntermediateMatch{ .groups = group_items };
             },

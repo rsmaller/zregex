@@ -14,7 +14,7 @@ pub const IntermediateMatch = struct { // Intermediary representation of matches
 
 pub const IntermediateMatchGroup = struct {
     start: usize, // Slices of original string passed in.
-    end: ?usize, // If the end is null, the group is not completed.
+    end: ?usize, // If the end is null, the group is not completed. If matching is finished with this at the top of the respective group's stack, the match is null.
 };
 
 pub const RepeatStackFrame = struct { // Reused RepeatStackFrame from repeat bytecode instruction. Unsure if needed.
