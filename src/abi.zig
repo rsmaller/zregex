@@ -75,6 +75,16 @@ pub export fn zregex_print_test() callconv(.c) void {
     }
 }
 
+/// Only here as an internal tool for printing diagnostics across the ABI.
+fn zregex_print(comptime fmt: []const u8, args: anytype) void {
+    if (io_ref) |io| {
+        io.print(fmt, args) catch {};
+    } else {
+        @panic("Null I/O reference cannot be accessed for printing. Please ensure library has been properly initialized!");
+    }
+}
+
+
 pub export fn zregex_print_bytecode(pattern_handle: PatternHandle) callconv(.c) void {
     const internal: *zregex.Pattern = @ptrCast(@alignCast(pattern_handle));
     if (io_ref) |io| {

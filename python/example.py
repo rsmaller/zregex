@@ -1,12 +1,12 @@
 import zregex, sys
 
 zregex.init()
-test = zregex.compile(sys.argv[2])
-my_match = test.match(sys.argv[1])
 
 print("Pattern: " + sys.argv[2])
 print("Match str: " + sys.argv[1])
 print()
+test = zregex.compile(sys.argv[1])
+my_match = test.match(sys.argv[2])
 test.print_ast(False)
 print()
 test.print_bytecode()

@@ -2,10 +2,13 @@ from .zregex import *
 
 class Match:
     def __init__(self, match_ptr):
-        self.__pattern = match_ptr.contents.pattern_ptr
         self.groups = []
-        for i in range(match_ptr.contents.group_count):
-            self.groups.append(id_index_internal(match_ptr, i).decode('utf-8'))
+        if match_ptr is not None:
+            self.__pattern = match_ptr.contents.pattern_ptr
+            for i in range(match_ptr.contents.group_count):
+                self.groups.append(id_index_internal(match_ptr, i).decode('utf-8'))
+        else:
+            self.__pattern = None
     def __getitem__(self, key):
         if isinstance(key, int):
             return self.groups[key]
@@ -48,11 +51,12 @@ class Pattern:
             return None
     def match(self, string: str):
         item = zregex.match_internal(self.__pattern, to_c_str_internal(string))
-        if item is None:
-            return None
-        ret = Match(item)
-        destroy_match_internal(item) # Zig's allocated match is immediately destroyed.
-        return ret
+        if item:
+            ret = Match(item)
+            destroy_match_internal(item) # Zig's allocated match is immediately destroyed.
+            return ret
+        else:
+            return Match(None) 
     def print_bytecode(self):
         return zregex.print_bytecode_internal(self.__pattern)
     def print_ast(self, show_len: bool):
