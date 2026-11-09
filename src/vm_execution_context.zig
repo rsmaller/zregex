@@ -51,7 +51,7 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
 }
 
 pub fn incrementStrPtr(self: *@This(), amount: usize) !void {
-    if (self.str_ptr >= self.string.len) {
+    if (self.str_ptr > self.string.len or (self.str_ptr == self.string.len and amount != 0)) { // increment should not error on non-consuming inputs.
         return core_types.MatchError.InvalidMatchIndexRange;
     } else {
         self.str_ptr += amount;
@@ -348,7 +348,6 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         switch (current_item) {
             .group_start => |grp| { 
                 if (grp.previous_group_ptr) |_| {
-                    std.debug.print("TRIMMING {d}\n", .{grp.current_group});
                     try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back.
                     self.current_group_ptr = grp.previous_group_ptr;
                 } else { // This branch can be reached when no choice points are pushed and a backtrack occurs.
