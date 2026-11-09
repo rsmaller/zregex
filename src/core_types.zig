@@ -74,6 +74,7 @@ pub const Match = struct {
 pub const ParsingError = error {
     TokenNotFound,
     EndOfString,
+    BeforeStartOfString,
     InvalidRange,
     VariableLookbehindRange,
     InvalidGroupName,
