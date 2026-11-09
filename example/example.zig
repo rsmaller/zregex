@@ -25,8 +25,8 @@ pub fn main(init: std.process.Init) !void {
     // var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
     // const stdout = &stdout_writer.interface;
     const stdout = zregex.printing.VirutalDebugIOStruct{};
-    const string_to_match = args[1]; //"john.doe@gmail.com";
-    const pattern = args[2];
+    const string_to_match = args[2]; //"john.doe@gmail.com";
+    const pattern = args[1];
     try stdout.print("Using allocator type {s}\n", .{@typeName(@TypeOf(AllocatorBackend))});
     try stdout.print("Size of fixed alloc buffer: {d}\n", .{fixed_alloc_buffer.len});
     try stdout.print("String: {s}, Pattern: {s}\n", .{ string_to_match, pattern }); // So string and pattern print before errors.
