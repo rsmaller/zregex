@@ -5,6 +5,7 @@ const vm_execution_types = @import("vm_execution_types.zig");
 const core_types = @import("core_types.zig");
 const instruction_types = @import("instruction_types.zig");
 const repetition_types = @import("repetition_types.zig");
+const zregex_build_options = @import("zregex_build_options");
 
 // VM stack re-namespacing for brevity.
 const MainStack = vm_execution_types.MainStack;
@@ -69,9 +70,11 @@ pub fn setStrPtr(self: *@This(), ptr: usize) !void {
 pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
     var instruction_iterations: usize = 0;
     while (self.ip < bytecode.len) {
-        instruction_iterations += 1;
-        if (instruction_iterations > 1000) {
-            return core_types.DebugError.PossibleInfiniteLoop;
+        if (comptime zregex_build_options.codelim) |codelim| {
+            instruction_iterations += 1;
+            if (instruction_iterations > codelim) {
+                return core_types.DebugError.PossibleInfiniteLoop;
+            }
         }
         self.jmp_queued = false;
         switch (bytecode[self.ip]) {

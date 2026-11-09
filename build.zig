@@ -5,8 +5,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Modules for C ABI.
     const translate_c = b.dependency("translate_c", .{});
-
     const zregex_header: Translator = .init(translate_c, .{
         .c_source_file = b.path("include/zregex.h"),
         .target = target,
@@ -18,11 +18,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // ZRegex internal modules.
     const zregex_mod = b.addModule("zregex", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
     });
-
     const zregex_dylib = b.addLibrary(.{
         .name = "zregex",
         .linkage = .dynamic,
@@ -37,6 +37,14 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+
+    // Main library build options.
+    const zregex_build_options = b.addOptions();
+    const codelim = b.option(usize, "codelim", "The amount of instruction iterations permitted in the VM before an error is produced. If not provided, the amount is unbounded");
+    zregex_build_options.addOption(?usize, "codelim", codelim);
+    zregex_mod.addOptions("zregex_build_options", zregex_build_options);
+
+    // Executables.
     b.installArtifact(zregex_dylib);
     const exe = b.addExecutable(.{
         .name = "example",
@@ -64,6 +72,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     b.installArtifact(exe2);
 
+    // Tests.
     const exe_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/test.zig"),
@@ -73,13 +82,17 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zregex", .module = zregex_mod },
             },
         }),
-        .use_llvm = true,
+        .use_llvm = true, // Required for fuzzer.
     });
+
+    // Test options.
     const test_options = b.addOptions();
     const fuzzlen = b.option(usize, "fuzzlen", "The length of the buffer the fuzzer will use for testing.") orelse 32; // Default fuzz length is 32.
     std.debug.print("Fuzzing will be done with length {d}\n", .{fuzzlen});
     test_options.addOption(usize, "fuzzlen", fuzzlen);
     exe_tests.root_module.addOptions("test_options", test_options);
+
+    // Test runners.
     const run_exe_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
