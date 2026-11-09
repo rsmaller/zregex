@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe2);
 
     // Tests.
+    const test_filter = b.option([]const u8, "test-filter", "The target test to run.");
     const exe_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/test.zig"),
@@ -82,6 +83,11 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zregex", .module = zregex_mod },
             },
         }),
+        .filters = 
+            if (test_filter) |filter|
+                &.{filter}
+            else
+                &.{},
         .use_llvm = true, // Required for fuzzer.
     });
 
