@@ -133,32 +133,14 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 try self.stack.push(allocator, .atomic);
             },
             .atomic_end => {
-                var atomic_frame_found: bool = false;
-                while (self.stack.hasItem()) {
-                    const current = try self.stack.pop(allocator);
-                    switch (current) {
-                        .atomic => {
-                            atomic_frame_found = true;
-                            break; // Breaks out of the while loop when the frame is found.
-                        },
-                        else => {},
-                    }
-                }
-                if (!atomic_frame_found) {
-                    return core_types.MatchError.MissingStartFrame;
-                }
+                _ = try self.restoreState(allocator, self.str_ptr, self.ip, StackFrame.atomic); 
             },
             .lookahead_start => {
                 try self.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = self.str_ptr, .negative = false, .jmp_index = null } });
             },
             .lookahead_end => {
-                const save_ip = self.ip;
-                if (!try self.backtrack(allocator, .{.allow_across_lookthroughs = true, .restore_state_to = StackFrame.lookahead})) {
-                    return null;
-                } 
-                const lookahead_frame = try self.stack.pop(allocator);
+                const lookahead_frame = try self.restoreState(allocator, null, self.ip, StackFrame.lookahead);
                 self.str_ptr = lookahead_frame.lookahead.saved_str_ptr;
-                self.ip = save_ip;
             },
             .lookbehind_start => |len| {
                 try self.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = self.str_ptr, .negative = false, .jmp_index = null } });
@@ -171,11 +153,8 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 }
             },
             .lookbehind_end => {
-                const save_ip = self.ip;
-                _ = try self.backtrack(allocator, .{.allow_across_lookthroughs = true, .restore_state_to = StackFrame.lookahead});
-                const lookahead_frame = try self.stack.pop(allocator);
-                self.str_ptr = lookahead_frame.lookahead.saved_str_ptr;
-                self.ip = save_ip;
+                const lookbehind_frame = try self.restoreState(allocator, null, self.ip, StackFrame.lookahead);
+                self.str_ptr = lookbehind_frame.lookahead.saved_str_ptr;
             },
             .neg_lookahead_start => |jmp_index| {
                 try self.stack.push(allocator, .{ .lookahead = .{ .saved_str_ptr = self.str_ptr, .negative = true, .jmp_index = jmp_index } });
@@ -323,34 +302,47 @@ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !v
     }
 }
 
-/// Reverts the VM to a recoverable state where it can try a different branch; this function is also used to finish a lookahead/lookbehind with the 
-/// restore_state_to option. When restore_state_to is used, groups backtracked against are considered successful matches and are not nulled out.
-fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !bool { // Returns false when there is no fallback.
+/// Wipes frames for completed non-backtrackable constructs (i.e. lookaheads, lookbehinds, and atomics) and restores the VM state with an expected 
+/// input position and instruction pointer.
+fn restoreState(self: *@This(), allocator: anytype, str_ptr: ?usize, ip: ?usize, recover_frame_tag: @typeInfo(vm_execution_types.StackFrame).@"union".tag_type.?) !StackFrame {
     while (self.stack.hasItem()) {
-        if (options.restore_state_to) |restore| {
-            if (std.meta.activeTag(try self.stack.peek()) == restore) {
-                return true;
-            }
+        if (std.meta.activeTag(try self.stack.peek()) == recover_frame_tag) {
+            if (str_ptr) |ptr| self.str_ptr = ptr;
+            if (ip) |ptr| self.ip = ptr;
+            return try self.stack.pop(allocator);
         }
         const current_item = try self.stack.pop(allocator);
         switch (current_item) {
-            .group_start => |grp| { // Backtracking outside of a group, meaning the group's entire match is void.
-                if (options.restore_state_to) |_| {} else { // Do not touch successful groups if restore_state_to is used.
-                    if (grp.previous_group_ptr) |_| {
-                        try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back.
-                        self.current_group_ptr = grp.previous_group_ptr;
-                    } else { // This branch can be reached when no choice points are pushed and a backtrack occurs.
-                        return false; // If resetting group ptr to null, match 0 failed so the whole match failed.
-                    }
+            .group_start => {},
+            .group_end => {},
+            .repeat => |rep| { // Forced stack restoration should hand back repetitions to the VM where they left off where the stack is being restored to.
+                self.current_rep_ptr = rep.previous_rep_ptr;
+            },
+            .choice_point => {},
+            .lookahead => {},
+            .atomic => {},
+        }
+    }
+    return core_types.MatchError.BadStackFrameType;
+}
+
+fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !bool { // Returns false when there is no fallback.
+    while (self.stack.hasItem()) {
+        const current_item = try self.stack.pop(allocator);
+        switch (current_item) {
+            .group_start => |grp| { 
+                if (grp.previous_group_ptr) |_| {
+                    try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back.
+                    self.current_group_ptr = grp.previous_group_ptr;
+                } else { // This branch can be reached when no choice points are pushed and a backtrack occurs.
+                    return false; // If resetting group ptr to null, match 0 failed so the whole match failed. This is true even in a forced lookahead, though that should never happen.
                 }
             },
             .group_end => |grp| {
-                if (options.restore_state_to) |_| {} else { // Do not touch successful groups if restore_state_to is used.
-                    self.current_group_ptr = grp.previous_group_ptr;
-                    (try self.groups[grp.ending_group].peekPtr()).end = null; // Only set the most recent match's end to null; try re-matching from the same start point.
-                }
+                self.current_group_ptr = grp.previous_group_ptr;
+                (try self.groups[grp.ending_group].peekPtr()).end = null; // Only set the most recent match's end to null; try re-matching from the same start point.
             },
-            .repeat => |rep| {
+            .repeat => |rep| { // Forced stack restoration should hand back repetitions to the VM where they left off where the stack is being restored to.
                 const current_count = rep.current_count; // DO NOT use self.currentCount() here. That function tries to stack access the repetition frame that was just popped here.
                 switch (rep.mode) {
                     .greedy => {
@@ -533,5 +525,4 @@ const ComparisonType = enum { LT, LE, EQ, GT, GE };
 
 const BacktrackOptions = struct {
     allow_across_lookthroughs: bool = false, // prevents always allowing backtracks to a negative lookthrough frame to succeed if the backtrack is triggered by a negative end instruction.
-    restore_state_to: ?@typeInfo(vm_execution_types.StackFrame).@"union".tag_type.? = null, // When using this option, the user is responsible for popping the frame backtracked to. This makes the data of that frame accessible to the user.
 };

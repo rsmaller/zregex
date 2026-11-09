@@ -275,6 +275,7 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
             }
             if (!scanner.scanSeeCharacter(str_to_parse, i, ',')) { // If comma is not encountered, it is one number so min and max should be the same.
                 count_max = .{ .bounded = count_min };
+                try scanner.scanConsumeCharacter(str_to_parse, i, '}');
             } else {
                 try scanner.scanConsumeCharacter(str_to_parse, i, ',');
                 if (i.* >= str_to_parse.len) {
