@@ -12,3 +12,4 @@ __pycache__/
 *.dylib
 *.so
 out.txt
+misc/
