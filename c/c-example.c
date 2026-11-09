@@ -7,8 +7,8 @@ int main(int argc, char **argv) {
         return -1;
     }
     zregex_init_c(stdout, fwrite);
-    char *string_to_match = argv[1]; //"john.doe@gmail.com";
-    char *pattern = argv[2];
+    char *string_to_match = argv[2]; //"john.doe@gmail.com";
+    char *pattern = argv[1];
     printf("String: %s, Pattern: %s\n", string_to_match, pattern); // So string and pattern print before errors.
     void *compiled_pattern = zregex_compile(pattern);
     printf("AST:\n");
