@@ -22,6 +22,7 @@ pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) !*ast_types.AS
     return ast;
 }
 
+/// The main parsing function which handles alternation syntax.
 fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     const len = str_to_parse.len;
     if (i.* >= len) return core_types.ParsingError.EndOfString;
@@ -38,20 +39,24 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
         }
     }
     var currentTerm: *ast_types.ASTNode = undefined;
-    if (str_to_parse[i.*] == '|' or str_to_parse[i.*] == ')') { // Handle epsilon as the first alternation argument.
+
+    // Parsing logic for alternations.
+    // -------------------
+    if (scanner.scanSeeCharacter(str_to_parse, i, '|') or scanner.scanSeeCharacter(str_to_parse, i, ')')) { // Handle epsilon as the first alternation argument.
         currentTerm = &EPSILON_UNIT;
-    } else { // If not an epsilon, just parse the first alternation as a regular term.
+    } else { // If not an epsilon, just parse the first alternation as a regular term. This is where the parsing defaults when no alternations are encountered.
         currentTerm = try parseTerm(allocator, str_to_parse, i);
     }
     try result_list.append(allocator, currentTerm);
-    while (i.* < len and str_to_parse[i.*] == '|') { // Parse through pipes as arguments.
-        i.* += 1;
-        if (i.* >= len or str_to_parse[i.*] == ')') { // Handle epsilon as the last alternation argument.
+    while (i.* < len and scanner.scanHaveCharacter(str_to_parse, i, '|')) { // Parse through pipes as arguments.
+        if (i.* >= len or scanner.scanSeeCharacter(str_to_parse, i, ')')) { // Handle epsilon as the last alternation argument.
             try result_list.append(allocator, &EPSILON_UNIT);
             break;
         }
         try result_list.append(allocator, try parseTerm(allocator, str_to_parse, i)); // Handle generic terms in alternation not caught by edge cases.
     }
+    // -------------------
+    
     const list_slice = try result_list.toOwnedSlice(allocator);
     result.* = .{ .alternation = .{ .parts = list_slice } }; // Start parsing alternations first, and assume 2 alternations minimum.
     if (list_slice.len == 1) { // Optimize away an alternation of only 1 element.
@@ -62,6 +67,7 @@ fn parseExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
+/// Parsing function which handles concatenation syntax.
 fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     const len = str_to_parse.len;
     if (i.* >= len) return core_types.ParsingError.EndOfString;
@@ -77,12 +83,17 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
             item.deinit(allocator);
         }
     }
+    
+    // Parsing logic for concatenations.
+    // -------------------
     var currentFactor = try parseFactor(allocator, str_to_parse, i);
     try result_list.append(allocator, currentFactor);
-    while (i.* < len and str_to_parse[i.*] != '|' and str_to_parse[i.*] != ')') { // If character pointed to is handled by expr or factor, break.
+    while (i.* < len and !scanner.scanSeeCharacter(str_to_parse, i, '|') and !scanner.scanSeeCharacter(str_to_parse, i, ')')) { // If character pointed to is handled by expr or factor, break.
         currentFactor = try parseFactor(allocator, str_to_parse, i);
         try result_list.append(allocator, currentFactor);
     }
+    // -------------------
+
     const list_slice = try result_list.toOwnedSlice(allocator);
     result.* = .{ .concatenation = .{ .parts = list_slice } };
     if (list_slice.len == 1) { // Destroy a concatenation of only 1 element; node is meant to sequentially link 2 or more elements together.
@@ -93,125 +104,101 @@ fn parseTerm(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*
     return result;
 }
 
+/// Parsing function which parses groups, character classes, or regular characters (atoms) and their postfix quantifiers.
 fn parseFactor(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     const len = str_to_parse.len;
     if (i.* >= len) return core_types.ParsingError.EndOfString;
-    if (str_to_parse[i.*] == '(' and (i.* == 0 or str_to_parse[i.* - 1] != '\\')) { // Count ( as group starter except when escaped.
-        i.* += 1; // Consume '('.
+
+    // Parsing logic for parenthesized groups.
+    // -------------------
+    if (scanner.scanSeeCharacter(str_to_parse, i, '(') and !scanner.scanSeeIsEscaped(str_to_parse, i)) {
+        try scanner.scanConsumeCharacter(str_to_parse, i, '(');
         const result: *ast_types.ASTNode = try parseGroupExpr(allocator, str_to_parse, i);
         errdefer result.deinit(allocator);
-        i.* += 1; // consume ')'
+        try scanner.scanConsumeCharacter(str_to_parse, i, ')');
         if (i.* < len) { // Don't check quantifiers when ) is at the end of the string.
             return try parseQuantifiers(result, allocator, str_to_parse, i);
         } else {
             return result;
         }
     }
+    // -------------------
+
+    // Parsing logic for character classes, literals, and postfix quantifiers. 
+    // -------------------
     var escaped: bool = false;
-    if (str_to_parse[i.*] == '\\') { // Handle generic escape sequence vs non escaped.
-        i.* += 1; // Consume backslash.
+    if (scanner.scanHaveCharacter(str_to_parse, i, '\\')) {
         if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
         }
         escaped = true;
     }
     const metacharacter = isMetaCharacter(str_to_parse[i.*], escaped);
-    var char_to_set: u8 = str_to_parse[i.*]; // Grab character and set value based on escape sequence.
-    if (escaped) {
-        switch (str_to_parse[i.*]) {
-            'n' => {
-                char_to_set = '\n';
-            },
-            't' => {
-                char_to_set = '\t';
-            },
-            'r' => {
-                char_to_set = '\r';
-            },
-            else => {},
-        }
-    }
+    const char_to_set = simplifiedEscapeCharacter(str_to_parse, i, escaped);
+    
     var atom: ?*ast_types.ASTNode = null;
     errdefer {
         if (atom) |_| atom.?.deinit(allocator);
     }
     if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
-        i.* += 1; // Consume the '['.
+        try scanner.scanConsumeCharacter(str_to_parse, i, '[');
         atom = try parseCharCLass(allocator, str_to_parse, i);
-        i.* += 1; // Consume the ']'.
+        try scanner.scanConsumeCharacter(str_to_parse, i, ']');
     } else {
         atom = try parseAtom(allocator, str_to_parse, i, char_to_set, metacharacter);
-        i.* += 1; // Consume the last character of the leaf.
+        try scanner.scanConsumeAnyCharacter(str_to_parse, i);
     }
     if (i.* >= len) return atom.?; // Only if at end of string, otherwise check for repetition.
     return try parseQuantifiers(atom.?, allocator, str_to_parse, i);
+    // -------------------
 }
 
+/// Parsing function which handles groupings.
 fn parseGroupExpr(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     const len = str_to_parse.len;
     if (i.* >= len) return core_types.ParsingError.EndOfString;
     const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
     result.* = .failed_parse;
     errdefer result.deinit(allocator);
-    if (str_to_parse[i.*] == '?') {
-        var lengthThreeLookaheadFound = true;
-        if (i.* + 2 < len) { // Check for length 3 group markers.
-            if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 3], "?<=")) {
-                i.* += 3; // consume ?<=
-                const expr = try parseExpr(allocator, str_to_parse, i); // Changed to initialize in local variable to prevent defer free segfault at 0x0. Possible compiler bug?
-                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = false, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
-            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 3], "?<!")) {
-                i.* += 3; // consume ?<!
-                const expr = try parseExpr(allocator, str_to_parse, i);
-                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = true, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
-            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?<")) {
-                i.* += 1; // Consume '?'.
-                const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
-                errdefer allocator.free(name);
-                const expr = try parseExpr(allocator, str_to_parse, i);
-                result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
-            } else {
-                lengthThreeLookaheadFound = false;
-            }
-        } else if (i.* + 2 >= len) { // If there is a flag start but no room for another character, emit an end of string error.
-            return core_types.ParsingError.EndOfString;
-        } else { // Assume the flag start is invalid.
+    if (scanner.scanSeeCharacter(str_to_parse, i, '?')) {
+        if (scanner.scanHaveString(str_to_parse, i, "?<=")) {
+            const expr = try parseExpr(allocator, str_to_parse, i); // Changed to initialize in local variable to prevent defer free segfault at 0x0. Possible compiler bug?
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = false, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
+        } else if (scanner.scanHaveString(str_to_parse, i, "?<!")) {
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .negated = true, .type = .{ .non_capturing = .{ .lookbehind = 0 } } } };
+        } else if (scanner.scanHaveString(str_to_parse, i, "?<")) {
+            i.* -= 1; // Give back < for name scanner function. 
+            const name = try allocator.dupe(u8, try scanner.scanGroupName(str_to_parse, i));
+            errdefer allocator.free(name);
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = name, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
+        } else if (scanner.scanHaveString(str_to_parse, i, "?=")) {
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
+        } else if (scanner.scanHaveString(str_to_parse, i, "?!")) {
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
+        } else if (scanner.scanHaveString(str_to_parse, i, "?:")) {
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
+        } else if (scanner.scanHaveString(str_to_parse, i, "?>")) {
+            const expr = try parseExpr(allocator, str_to_parse, i);
+            result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
+        } else { // ? found but no matching flag.
             return core_types.ParsingError.TokenNotFound;
         }
-        if (!lengthThreeLookaheadFound and i.* + 1 < len) { // Check length 2 lookahead flags if a longer length one was not found and it is safe to do so.
-            if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?=")) {
-                i.* += 2; // consume ?=
-                const expr = try parseExpr(allocator, str_to_parse, i);
-                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = false } };
-            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?!")) {
-                i.* += 2; // consume ?!
-                const expr = try parseExpr(allocator, str_to_parse, i);
-                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .lookahead }, .negated = true } };
-            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?:")) {
-                i.* += 2; // consume ?:
-                const expr = try parseExpr(allocator, str_to_parse, i);
-                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .generic }, .negated = false } };
-            } else if (std.mem.eql(u8, str_to_parse[i.* .. i.* + 2], "?>")) {
-                i.* += 2; // consume ?>
-                const expr = try parseExpr(allocator, str_to_parse, i);
-                result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .non_capturing = .atomic }, .negated = false } };
-            } else { // ? found but no matching flag.
-                return core_types.ParsingError.TokenNotFound;
-            }
-        } 
     } else { // If the group found is not marked with ?, parse as normal group.
         const expr = try parseExpr(allocator, str_to_parse, i);
         result.* = .{ .group = .{ .expr = expr, .name = null, .id = 0, .type = .{ .capturing = .generic }, .negated = false } };
     }
-    if (i.* >= len) { // Only need length check again if i is potentially incremented in parseExpr().
+    if (!scanner.scanSeeCharacter(str_to_parse, i, ')')) {
         return core_types.ParsingError.EndOfString;
-    }
-    if (str_to_parse[i.*] != ')') {
-        return core_types.ParsingError.TokenNotFound;
     }
     return result;
 }
 
+/// Parsing function which handles character classes.
 fn parseCharCLass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     if (i.* >= str_to_parse.len) return core_types.ParsingError.EndOfString;
     var result_list = try std.ArrayList(ast_types.AtomNode).initCapacity(allocator, 1);
@@ -228,7 +215,9 @@ fn parseCharCLass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     var item: ast_types.AtomNode = undefined;
     while (i.* < str_to_parse.len and (!scanner.scanSeeCharacter(str_to_parse, i, ']') or scanner.scanSeeIsEscaped(str_to_parse, i))) { // Parse until ending brace, excluding ending braces escaped with backslash.
         item = try scanner.scanClassAtom(str_to_parse, i); // Parse the first item in the class.
-        try scanner.scanConsumeAnyCharacter(str_to_parse, i); // Consume the last character scanned in scanClassAtom.
+        if (i.* >= str_to_parse.len) {
+            return core_types.ParsingError.EndOfString;
+        }
         try result_list.append(allocator, item);
     }
     if (i.* >= str_to_parse.len) {
@@ -240,6 +229,7 @@ fn parseCharCLass(allocator: anytype, str_to_parse: []const u8, i: *usize) anyer
     return result;
 }
 
+/// Parsing function which handles postfix quantifier operations on atom nodes (i.e. {1}, +, *, etc.)
 fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: []const u8, i: *usize) anyerror!*ast_types.ASTNode {
     var count_min: usize = undefined;
     var count_max: repetition_types.RepetitionBoundType = undefined;
@@ -294,7 +284,7 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
             return atom;
         },
     }
-    var rep_type: repetition_types.RepeaterType = .greedy;
+    var rep_type: repetition_types.RepeaterType = .greedy; // Greedy, possessive, and lazy awareness.
     if (scanner.scanHaveCharacter(str_to_parse, i, '+')) {
         rep_type = .possessive;
     } else if (scanner.scanHaveCharacter(str_to_parse, i, '?')) {
@@ -305,6 +295,8 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, str_to_parse: 
     return atom_parent;
 }
 
+/// Parses a single character which does not have a special syntactic function. Note that an escaped character, metacharacter or otherwise,
+/// which meets this description is parsed here (i.e. \d, \n, a, ., etc.)
 fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_set: u8, metacharacter: bool) anyerror!*ast_types.ASTNode {
     var atom_result: ast_types.AtomNode = undefined;
     switch (metacharacter) {
@@ -344,7 +336,7 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
                     atom_result = .{ .atom = .any, .inverted = false };
                 },
                 'k' => {
-                    if (i.* + 1 >= str_to_parse.len or str_to_parse[i.* + 1] != '<') {
+                    if (!scanner.scanSeeString(str_to_parse, i, "k<")) {
                         return core_types.ParsingError.InvalidGroupName;
                     }
                     var z = i.* + 1; // Skip to <, start of name.
@@ -385,6 +377,29 @@ fn parseAtom(allocator: anytype, str_to_parse: []const u8, i: *usize, char_to_se
     const result = try allocator.create(ast_types.ASTNode);
     result.* = .{ .atom = atom_result };
     return result;
+}
+
+/// Flattens character sequences which escape to a single character value into that character.
+fn simplifiedEscapeCharacter(str_to_parse: []const u8, i: *usize, escaped: bool) u8 {
+    var char_to_set: u8 = str_to_parse[i.*]; // Grab character and set value based on escape sequence.
+    if (escaped) {
+        switch (str_to_parse[i.*]) {
+            'n' => {
+                char_to_set = '\n';
+            },
+            't' => {
+                char_to_set = '\t';
+            },
+            'r' => {
+                char_to_set = '\r';
+            },
+            'f' => {
+                char_to_set = 0x0C; // Zig does not support form feed character literals; this is the best way to represent it.
+            },
+            else => {},
+        }
+    }
+    return char_to_set;
 }
 
 fn isMetaCharacter(character: u8, escaped: bool) bool {

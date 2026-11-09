@@ -47,16 +47,16 @@ pub fn scanGroupName(str_to_scan: []const u8, i: *usize) ![]const u8 {
 pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
     var escaped: bool = false;
     const len: usize = str_to_scan.len;
-    if (str_to_scan[i.*] == '\\') {
-        i.* += 1; // Consume backslash.
+    if (scanHaveCharacter(str_to_scan, i, '\\')) {
         if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
         }
         escaped = true;
     }
     var char_to_set: u8 = str_to_scan[i.*];
+    try scanConsumeAnyCharacter(str_to_scan, i);
     if (escaped) {
-        switch (str_to_scan[i.*]) {
+        switch (char_to_set) {
             'n' => {
                 char_to_set = '\n';
             },
@@ -66,68 +66,70 @@ pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
             'r' => {
                 char_to_set = '\r';
             },
+            'f' => {
+                char_to_set = 0x0C;
+            },
             ']' => {}, // Here for explicitness; already handled in the char_to_set assignment line.
             'd' => {
-            if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
-                return core_types.ParsingError.TokenNotFound;
-            }
-            return .{ .atom = .digit, .inverted = false };
-        },
+                if (scanSeeCharacter(str_to_scan, i, '-')) {
+                    return core_types.ParsingError.TokenNotFound;
+                }
+                return .{ .atom = .digit, .inverted = false };
+            },
             'D' => {
-                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
+                if (scanSeeCharacter(str_to_scan, i, '-')) {
                     return core_types.ParsingError.TokenNotFound;
                 }
                 return .{ .atom = .digit, .inverted = true };
             },
             'w' => {
-                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
+                if (scanSeeCharacter(str_to_scan, i, '-')) {
                     return core_types.ParsingError.TokenNotFound;
                 }
                 return .{ .atom = .word, .inverted = false };
             },
             'W' => {
-                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
+                if (scanSeeCharacter(str_to_scan, i, '-')) {
                     return core_types.ParsingError.TokenNotFound;
                 }
                 return .{ .atom = .word, .inverted = true };
             },
             's' => {
-                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
+                if (scanSeeCharacter(str_to_scan, i, '-')) {
                     return core_types.ParsingError.TokenNotFound;
                 }
                 return .{ .atom = .whitespace, .inverted = false };
             },
             'S' => {
-                if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') {
+                if (scanSeeCharacter(str_to_scan, i, '-')) {
                     return core_types.ParsingError.TokenNotFound;
                 }
                 return .{ .atom = .whitespace, .inverted = true };
             },
-            'b', 'B' => { // Not allowed at all in char classes.
+            'b', 'B', 'A', 'Z' => { // Not allowed at all in char classes.
                 return core_types.ParsingError.TokenNotFound;
             },
             else => {}, // Exhaustive switching requirement.
         }
     }
     escaped = false;
-    if (i.* + 1 < len and str_to_scan[i.* + 1] == '-') { // Range syntax.
-        if (i.* + 2 < len and str_to_scan[i.* + 2] == ']') { // Return so that '-' is interpreted as a character at the end.
+    if (scanHaveCharacter(str_to_scan, i, '-')) { // Range syntax.
+        if (scanSeeCharacter(str_to_scan, i, ']')) { // Return so that '-' is interpreted as a character at the end.
             return .{ .atom = .{ .generic = char_to_set }, .inverted = false };
         }
-        i.* += 2; // Skip past current item and -.
         if (i.* >= len) {
             return core_types.ParsingError.EndOfString;
         }
-        if (str_to_scan[i.*] == '\\') {
-            i.* += 1; // Consume backslash.
+        if (scanHaveCharacter(str_to_scan, i, '\\')) {
             if (i.* >= len) {
                 return core_types.ParsingError.EndOfString;
             }
             escaped = true;
         }
         var char_to_set2: u8 = str_to_scan[i.*]; // Grab character after -.
+        try scanConsumeAnyCharacter(str_to_scan, i); // Consume the last character scanned in scanClassAtom.
         if (escaped) {
-            switch (str_to_scan[i.*]) {
+            switch (char_to_set2) {
                 'n' => {
                     char_to_set2 = '\n';
                 },
@@ -136,6 +138,9 @@ pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
                 },
                 'r' => {
                     char_to_set2 = '\r';
+                },
+                'f' => {
+                    char_to_set = 0x0C;
                 },
                 ']' => {},
                 'b', 'B', 'd', 'D', 's', 'S', 'w', 'W', 'k', 'A', 'Z' => { // Characters not allowed in ranges or at all.
@@ -161,6 +166,7 @@ pub fn scanClassAtom(str_to_scan: []const u8, i: *usize) !ast_types.AtomNode {
 
 
 // The scanning functions that are used for parser branching.
+
 /// Returns a boolean representing whether a character is present in the input string.
 pub fn scanSeeCharacter(str_to_scan: []const u8, i: *usize, character: u8) bool {
     return i.* < str_to_scan.len and str_to_scan[i.*] == character;
@@ -171,6 +177,21 @@ pub fn scanHaveCharacter(str_to_scan: []const u8, i: *usize, character: u8) bool
     const result = scanSeeCharacter(str_to_scan, i, character);
     if (result) {
         i.* += 1; // Consume character.
+    }
+    return result;
+}
+
+pub fn scanSeeString(str_to_scan: []const u8, i: *usize, string: []const u8) bool {
+    if (string.len + i.* <= str_to_scan.len) {
+        return std.mem.eql(u8, str_to_scan[i.*..i.*+string.len], string[0..string.len]);      
+    }
+    else return false;
+}
+
+pub fn scanHaveString(str_to_scan: []const u8, i: *usize, string: []const u8) bool {
+    const result = scanSeeString(str_to_scan, i, string);
+    if (result) {
+        i.* += string.len;
     }
     return result;
 }
