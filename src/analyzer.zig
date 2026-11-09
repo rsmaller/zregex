@@ -9,11 +9,11 @@ pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedA
     try genericASTAnalyze(ast, &current_grp_id); // Analysis tree-walks split from trimming to simplify debugging; may be merged at a later date.
     try trimAST(allocator, ast);
     var mapping = try mapNames(allocator, ast);
-    try groupIDAnalyze(ast, current_grp_id, mapping);
     errdefer {
         mapping.id_to_name_map.deinit();
-        mapping.name_to_id_map.deinit();
+        destroyNameMap(allocator, &mapping.name_to_id_map); // name map owns name string allocations; therefore, it frees them.
     }
+    try groupIDAnalyze(ast, current_grp_id, mapping);
     return ast_types.AnalyzedAST{
         .ast = ast,
         .map = mapping,
@@ -22,9 +22,21 @@ pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedA
     };
 }
 
+fn destroyNameMap(allocator: anytype, map: *std.StringHashMap(usize)) void {
+    var iter = map.iterator();
+    while (true) {
+        const item = iter.next();
+        if (item) |to_free| {
+            allocator.free(to_free.key_ptr.*);
+        }
+        else { break; }
+    }
+    map.deinit();
+}
+
 fn mapNames(allocator: anytype, ast: *ast_types.ASTNode) !core_types.NameIDMap {
     var name_to_id_map = std.StringHashMap(usize).init(allocator);
-    errdefer name_to_id_map.deinit();
+    errdefer destroyNameMap(allocator, &name_to_id_map);
     var id_to_name_map = std.AutoHashMap(usize, []const u8).init(allocator);
     errdefer id_to_name_map.deinit();
     try mapNamesRecursive(allocator, &name_to_id_map, &id_to_name_map, ast);
