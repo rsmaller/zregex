@@ -189,7 +189,19 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 }
             },
             .backref => |id| {
-                const group_compare_slice = try (try self.groupIndex(id)).peek();
+                const group_compare_slice = (try self.groupIndex(id)).peek() catch |err| {
+                    switch(err) {
+                        core_types.MatchError.EmptyStack => { // If there are no groups on that group stack, they are being referenced before ever being pushed to, so backtrack.
+                            if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
+                                return null;
+                            }
+                            continue;
+                        },
+                        else => {
+                            return err;
+                        }
+                    }
+                };
                 const end_nullable = group_compare_slice.end;
                 if (end_nullable) |end| {
                     const len: usize = end - group_compare_slice.start;
@@ -199,6 +211,10 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                         if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
                             return null;
                         }
+                    }
+                } else {
+                    if (!try self.backtrack(allocator, .{ .allow_across_lookthroughs = true })) {
+                        return null;
                     }
                 }
             },
@@ -332,6 +348,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         switch (current_item) {
             .group_start => |grp| { 
                 if (grp.previous_group_ptr) |_| {
+                    std.debug.print("TRIMMING {d}\n", .{grp.current_group});
                     try self.groups[grp.current_group].trimTop(allocator); // Most recent group is not valid; give it back.
                     self.current_group_ptr = grp.previous_group_ptr;
                 } else { // This branch can be reached when no choice points are pushed and a backtrack occurs.
