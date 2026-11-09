@@ -111,3 +111,6 @@ pub const MatchError = error {
     InvalidMatchIndexRange,
 };
 
+pub const DebugError = error {
+    PossibleInfiniteLoop,
+};

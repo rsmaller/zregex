@@ -51,7 +51,7 @@ pub fn deinit(self: *@This(), allocator: anytype) void {
 }
 
 pub fn incrementStrPtr(self: *@This(), amount: usize) !void {
-    if (self.str_ptr > self.string.len or (self.str_ptr == self.string.len and amount != 0)) { // increment should not error on non-consuming inputs.
+    if (self.str_ptr + amount > self.string.len) { 
         return core_types.MatchError.InvalidMatchIndexRange;
     } else {
         self.str_ptr += amount;
@@ -67,7 +67,12 @@ pub fn setStrPtr(self: *@This(), ptr: usize) !void {
 }
 
 pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction_types.Instruction, string: []const u8) anyerror!?IntermediateMatch {
+    var instruction_iterations: usize = 0;
     while (self.ip < bytecode.len) {
+        instruction_iterations += 1;
+        if (instruction_iterations > 1000) {
+            return core_types.DebugError.PossibleInfiniteLoop;
+        }
         self.jmp_queued = false;
         switch (bytecode[self.ip]) {
             .allocate_groups, .header_start, .header_end => { // This should only be done once per higher-level call to the VM, at bytecode index 0.
@@ -289,6 +294,7 @@ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !v
     }
     current_frame_ref.current_count += 1;
     self.repetition_consumed_input = self.str_ptr > current_frame_ref.previous_str_ptr;
+    current_frame_ref.previous_str_ptr = self.str_ptr; // Prevent nefarious repetitions not properly setting previous_str_ptr for no-progress repetition checking.
     const min: usize = current_frame_ref.min;
     const max: repetition_types.RepetitionBoundType = current_frame_ref.max;
     const mode: repetition_types.RepeaterType = current_frame_ref.mode;

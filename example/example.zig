@@ -34,7 +34,7 @@ pub fn main(init: std.process.Init) !void {
     var compiled_pattern = try zregex.compile(allocator, pattern);
     defer compiled_pattern.deinit();
     try stdout.print("AST:\n", .{});
-    zregex.printAST(stdout, compiled_pattern, .{ .show_match_width = true });
+    zregex.printAST(stdout, compiled_pattern, .{ .show_match_width = false });
     try stdout.flush();
     try stdout.print("\nBytecode:\n", .{});
     zregex.printBytecode(stdout, compiled_pattern);
