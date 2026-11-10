@@ -1,9 +1,26 @@
 const std = @import("std");
 
+/// Returns a pointer to T of indirection levels of indirection.
+pub fn ChainedPointer(T: type, indirection: comptime_int) type {
+    if (indirection <= 0) {
+        return T;
+    } 
+    return ChainedPointer(*T, indirection - 1);
+}
+
+/// Returns a pointer to T of indirection levels of const indirection.
+pub fn ChainedConstPointer(T: type, indirection: comptime_int) type {
+    if (indirection <= 0) {
+        return T;
+    }
+    return ChainedConstPointer(*const T, indirection - 1);
+}
+
+/// Gets the base type of a pointer type; removes all levels of pointer indirection from the pointed-to type.
 pub fn UnwrappedPointer(T: type) type {
     switch(@typeInfo(T)) {
         .pointer => |ptr| {
-            return ptr.child;
+            return UnwrappedPointer(ptr.child);
         },
         else => {
             return T;
@@ -11,10 +28,11 @@ pub fn UnwrappedPointer(T: type) type {
     }
 }
 
+/// Gets the base value of a pointer value; dereferences all levels of pointer indirection from the pointed-to value.
 pub fn unwrapPointer(item: anytype) UnwrappedPointer(@TypeOf(item)) {
     switch(@typeInfo(@TypeOf(item))) {
         .pointer => {
-            return item.*;
+            return unwrapPointer(item.*);
         },
         else => {
             return item;

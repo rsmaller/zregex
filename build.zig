@@ -98,8 +98,22 @@ pub fn build(b: *std.Build) void {
     test_options.addOption(usize, "fuzzlen", fuzzlen);
     exe_tests.root_module.addOptions("test_options", test_options);
 
+    // Type reflection testing.
+    const reflection_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/type_reflection_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zregex", .module = zregex_mod },
+            },
+        }),
+    });
+
     // Test runners.
     const run_exe_tests = b.addRunArtifact(exe_tests);
+    const run_reflection_tests = b.addRunArtifact(reflection_tests);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_reflection_tests.step);
 }
