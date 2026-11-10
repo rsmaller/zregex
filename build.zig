@@ -1,7 +1,34 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const Translator = @import("translate_c").Translator;
 
+/// Since Zig is currently unstable, this program will not compile if the major and minor versions of the Zig compiler
+/// do not match exactly what is expected in the source code.
+pub fn assertMajorMinorZigVersion(comptime ver: []const u8) void {
+    comptime {
+        const zig_required_version_string = ver;
+        const zig_required_version = std.SemanticVersion.parse(zig_required_version_string) catch unreachable;
+        const current_zig_version = builtin.zig_version;
+        const current_zig_version_string = std.fmt.comptimePrint("{d}.{d}.{d}", .{current_zig_version.major, current_zig_version.minor, current_zig_version.patch});
+        if (
+            current_zig_version.major != zig_required_version.major or
+            current_zig_version.minor != zig_required_version.minor
+        ) {
+            const version_err_msg =
+                \\ This program requires zig version
+                ++ " " ++ zig_required_version_string ++
+                \\ but version
+                ++ " " ++ current_zig_version_string ++
+                \\ was found.
+                ;
+            @compileError(version_err_msg);
+        }
+    }
+}
+
 pub fn build(b: *std.Build) void {
+    assertMajorMinorZigVersion("0.17.0");
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
