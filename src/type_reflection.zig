@@ -28,6 +28,17 @@ pub fn UnwrappedPointer(T: type) type {
     }
 }
 
+pub fn unwrappedPointerIndirectionCount(T: type) comptime_int {
+    switch(@typeInfo(T)) {
+        .pointer => |ptr| {
+            return unwrappedPointerIndirectionCount(ptr.child) + 1;
+        },
+        else => {
+            return 0;
+        }
+    }
+}
+
 /// Gets the base value of a pointer value; dereferences all levels of pointer indirection from the pointed-to value.
 pub fn unwrapPointer(item: anytype) UnwrappedPointer(@TypeOf(item)) {
     switch(@typeInfo(@TypeOf(item))) {

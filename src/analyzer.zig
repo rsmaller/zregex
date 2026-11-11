@@ -344,9 +344,11 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
         for (i + 1..arr.len) |j| {
             if (type_reflection.genericEqualityDispatch(arr[i], arr[j])) {
                 freed[j] = true;
-                switch (@typeInfo(T)) {
+                switch (comptime @typeInfo(T)) {
                     .pointer => |ptr| { // Function assumes AST-like structure where pointers are on the heap.
-                        if (ptr.child == ast_types.ASTNode) {
+                        if (comptime type_reflection.unwrappedPointerIndirectionCount(T) != 1) {
+                            @compileError("Excessively indirected pointer attempted to be freed! Please only pass in single pointers here.");
+                        } else if (comptime type_reflection.declExists(ptr.child, "deinit", std.builtin.Type.Fn)) {
                             arr[j].deinit(allocator);
                         } else {
                             try allocator.free(arr[j]);
