@@ -15,6 +15,7 @@ test "indirection" {
     std.debug.assert(
         type_reflection.unwrapPointer(x) == test_val and 
         type_reflection.unwrapPointer(y) == test_val and
-        type_reflection.unwrapPointer(z) == test_val
+        type_reflection.unwrapPointer(z) == test_val and 
+        type_reflection.unwrappedPointerIndirectionCount(@TypeOf(z)) == 2 
     );
 }
