@@ -13,6 +13,9 @@ def main():
         fuzz_buflen = argv[3]
     else:
         fuzz_buflen = 32
-    system(f"zig build --fuzz={fuzz_count} -Dfuzzlen={fuzz_buflen} -Doptimize=ReleaseFast -Dtest-filter={filter} test")
+    if (fuzz_count == "unlimited"):
+        system(f"zig build --fuzz -Dfuzzlen={fuzz_buflen} -Doptimize=ReleaseFast -Dtest-filter={filter} test")
+    else:
+        system(f"zig build --fuzz={fuzz_count} -Dfuzzlen={fuzz_buflen} -Doptimize=ReleaseFast -Dtest-filter={filter} test")
 
 main()
