@@ -26,17 +26,20 @@ pub const GroupNode = struct {
     expr: *ASTNode,
     id: ?usize,
     name: ?[]const u8, // Not nested in GroupNode for simplicity.
-    type: union(enum) { capturing: union(enum) {
-        generic,
-    }, non_capturing: union(enum) {
-        generic: void,
-        atomic: void,
-        lookahead: void,
-        lookbehind: usize,
-    } },
+    type: union(enum) { 
+        capturing: union(enum) {
+            generic,
+        }, 
+        non_capturing: union(enum) {
+            generic: void,
+            atomic: void,
+            lookahead: void,
+            lookbehind: usize,
+        },
+    },
     negated: bool,
     pub fn equals(self: *const GroupNode, other: GroupNode) bool {
-        if (@intFromEnum(self.type) != @intFromEnum(other.type)) {
+        if (std.meta.activeTag(self.type) != std.meta.activeTag(other.type)) {
             return false;
         }
         if (self.id != other.id) {
@@ -50,12 +53,12 @@ pub const GroupNode = struct {
         }
         switch (self.type) {
             .capturing => |capt| {
-                if (@intFromEnum(capt) != @intFromEnum(other.type.capturing)) {
+                if (std.meta.activeTag(capt) != std.meta.activeTag(other.type.capturing)) {
                     return false;
                 }
             },
             .non_capturing => |non_capt| {
-                if (@intFromEnum(non_capt) != @intFromEnum(other.type.non_capturing)) {
+                if (std.meta.activeTag(non_capt) != std.meta.activeTag(other.type.non_capturing)) {
                     return false;
                 }
             },
@@ -174,6 +177,22 @@ pub const ASTNode = union(enum) {
     class: ClassNode,
     epsilon: void, // Generic empty node.
     failed_parse: void,
+    /// Allows one to create simple void-valued tag nodes in-place.
+    pub fn create(allocator: anytype, comptime tag: anytype) !*@This() {
+        const ret = try allocator.create(@This());
+        if (comptime @FieldType(@This(), @tagName(tag)) == void) { 
+            ret.* = tag;
+        } else {
+            @compileError("Can't assign non-void tag to ASTNode without values. Please create a node with data!");
+        }
+        return ret;
+    }
+    /// Allows one to create any AST node (with data) in-place.
+    pub fn createWithData(allocator: anytype, data: ASTNode) !*@This() {
+        const ret = try allocator.create(@This());
+        ret.* = data;
+        return ret;
+    }
     pub fn equals(self: *const ASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
         comptime {
             if (type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
@@ -181,7 +200,7 @@ pub const ASTNode = union(enum) {
             }
         }
         const other_unwrapped_pointer: ASTNode = type_reflection.unwrapPointer(other);
-        if (@intFromEnum(self.*) != @intFromEnum(other_unwrapped_pointer)) {
+        if (std.meta.activeTag(self.*) != std.meta.activeTag(other_unwrapped_pointer)) {
             return false;
         }
         switch (self.*) {
@@ -215,7 +234,7 @@ pub const ASTNode = union(enum) {
                     return false;
                 }
             },
-            .epsilon => {}, // Epsilons contain no data and are always the same.
+            .epsilon => {}, // Epsilons and failed parses contain no data and are always the same.
             .failed_parse => {},
         }
         return true;
@@ -263,7 +282,9 @@ pub const ASTNode = union(enum) {
             .failed_parse => { // Failed parses point to a heap allocation and should be freed.
                 allocator.destroy(self);
             },
-            .epsilon => {}, // Epsilons contain no data and are always the same. Uses a single element and should not be freed.
+            .epsilon => {
+                allocator.destroy(self);
+            }, 
         }
     }
 };

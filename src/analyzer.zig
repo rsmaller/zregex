@@ -308,8 +308,30 @@ pub fn matchRequirementRange(ast: *const ast_types.ASTNode) core_types.AnalysisE
     }
 }
 
-/// Makes a copy of an array without duplicates, in-order. Assumes that pointer elements are heap-allocated and single-pointers.
-/// Types must be trivially comparable or structs/unions that implement an equals() method for duplicate checking.
+/// Makes a copy of an array of AST nodes without duplicates, in-order. Assumes that pointer elements are heap-allocated and single-pointers.
+fn removeDuplicatesAST(allocator: anytype, arr: []*ast_types.ASTNode) !@TypeOf(arr) {
+    const T = @TypeOf(arr[0]);
+    var list = try std.ArrayList(T).initCapacity(allocator, 1);
+    errdefer list.deinit(allocator);
+    var freed = try allocator.alloc(bool, arr.len);
+    defer allocator.free(freed);
+    @memset(freed, false);
+    for (arr, 0..) |item, i| {
+        if (freed[i]) continue;
+        try list.append(allocator, item);
+        for (i + 1..arr.len) |j| {
+            if (arr[i].equals(arr[j])) {
+                freed[j] = true;
+                arr[j].deinit(allocator);
+            }
+        }
+    }
+    return try list.toOwnedSlice(allocator);
+}
+
+/// Type-generic duplicate removal function. Makes a copy of an array without duplicates, in-order. Assumes that pointer 
+/// elements are heap-allocated and single-pointers. Types must be trivially comparable or structs/unions that implement 
+/// an equals() method for duplicate checking.
 fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     const T = @TypeOf(arr[0]);
     var list = try std.ArrayList(T).initCapacity(allocator, 1);
@@ -323,7 +345,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
             if (type_reflection.genericEqualityDispatch(arr[i], arr[j])) {
                 freed[j] = true;
                 switch (@typeInfo(T)) {
-                    .pointer => |ptr| {
+                    .pointer => |ptr| { // Function assumes AST-like structure where pointers are on the heap.
                         if (ptr.child == ast_types.ASTNode) {
                             arr[j].deinit(allocator);
                         } else {
@@ -337,6 +359,7 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
     }
     return try list.toOwnedSlice(allocator);
 }
+        
 
 fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
     switch (ast.*) {
@@ -369,16 +392,15 @@ fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
         }, // outside of group, just recurse.
         .alternation => |*alt| {
             const old_alt_parts = alt.parts;
-            alt.*.parts = try removeDuplicates(allocator, alt.parts);
+            alt.parts = try removeDuplicatesAST(allocator, alt.parts);
             allocator.free(old_alt_parts);
             if (alt.parts.len == 1) {
-                const old_alt_parts_len_one = alt.parts;
-                const old_alt_item = alt.parts[0];
-                ast.* = alt.parts[0].*; // Truncation trick that overwrites the alternation node with its first and only alternation.
+                const old_alt_item: *ast_types.ASTNode = @alignCast(alt.parts[0]);
+                allocator.free(alt.parts);
+                ast.* = old_alt_item.*; // Truncation trick that overwrites the alternation node with its first and only alternation.
                                         // This simplifies the AST and prevents single-alternation alternation nodes after analysis.
                                         // DO NOT ACCESS "alt" AFTER THIS LINE IN THIS SCOPE! The alternation tag is no longer active
                                         // after this line.
-                allocator.free(old_alt_parts_len_one);
                 allocator.destroy(old_alt_item);
                 try trimAST(allocator, ast); // Re-trim AST as the truncated alternation part.
             } else {

@@ -5,14 +5,13 @@ const type_reflection = @import("type_reflection.zig");
 const core_types = @import("core_types.zig");
 const repetition_types = @import("repetition_types.zig");
 const ast_types = @import("ast_types.zig");
+const ASTNode = ast_types.ASTNode;
 const ScanContext = @import("scanner.zig");
 
-var EPSILON_UNIT: ast_types.ASTNode = .epsilon; // Generic epsilon copy used everywhere; contains no data.
-
-pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) !*ast_types.ASTNode {
+pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) !*ASTNode {
     try ascii_assertion.assert_ascii_string(str_to_parse);
     var scanner: ScanContext = .init(str_to_parse);
-    var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, &scanner)) else &EPSILON_UNIT;
+    var ast = if (str_to_parse.len > 0) (try parseExpr(allocator, &scanner)) else try ASTNode.create(allocator, .epsilon);
     errdefer {
         ast.deinit(allocator);
     }
@@ -23,13 +22,12 @@ pub fn compileToAST(allocator: anytype, str_to_parse: []const u8) !*ast_types.AS
 }
 
 /// The main parsing function which handles alternation syntax.
-fn parseExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTNode {
+fn parseExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     const len = scanner.strlen();
     if (scanner.ptr() >= len) return core_types.ParsingError.EndOfString;
-    var result = try allocator.create(ast_types.ASTNode);
+    var result = try ASTNode.create(allocator, .failed_parse);
     errdefer result.deinit(allocator);
-    result.* = .failed_parse;
-    var result_list = try std.ArrayList(*ast_types.ASTNode).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(*ASTNode).initCapacity(allocator, 1);
     defer {
         result_list.deinit(allocator);
     }
@@ -38,19 +36,19 @@ fn parseExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTN
             item.deinit(allocator);
         }
     }
-    var currentTerm: *ast_types.ASTNode = undefined;
+    var currentTerm: *ASTNode = undefined;
 
     // Parsing logic for alternations.
     // -------------------
     if (scanner.scanSeeCharacter('|') or scanner.scanSeeCharacter(')')) { // Handle epsilon as the first alternation argument.
-        currentTerm = &EPSILON_UNIT;
+        currentTerm = try ASTNode.create(allocator, .epsilon);
     } else { // If not an epsilon, just parse the first alternation as a regular term. This is where the parsing defaults when no alternations are encountered.
         currentTerm = try parseTerm(allocator, scanner);
     }
     try result_list.append(allocator, currentTerm);
     while (scanner.ptr() < len and scanner.scanHaveCharacter('|')) { // Parse through pipes as arguments.
         if (scanner.ptr() >= len or scanner.scanSeeCharacter(')')) { // Handle epsilon as the last alternation argument.
-            try result_list.append(allocator, &EPSILON_UNIT);
+            try result_list.append(allocator, try ASTNode.create(allocator, .epsilon));
             break;
         }
         try result_list.append(allocator, try parseTerm(allocator, scanner)); // Handle generic terms in alternation not caught by edge cases.
@@ -68,13 +66,12 @@ fn parseExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTN
 }
 
 /// Parsing function which handles concatenation syntax.
-fn parseTerm(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTNode {
+fn parseTerm(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     const len = scanner.strlen();
     if (scanner.ptr() >= len) return core_types.ParsingError.EndOfString;
-    var result = try allocator.create(ast_types.ASTNode);
+    var result = try ASTNode.create(allocator, .failed_parse);
     errdefer result.deinit(allocator);
-    result.* = .failed_parse;
-    var result_list = try std.ArrayList(*ast_types.ASTNode).initCapacity(allocator, 1);
+    var result_list = try std.ArrayList(*ASTNode).initCapacity(allocator, 1);
     defer {
         result_list.deinit(allocator);
     }
@@ -105,7 +102,7 @@ fn parseTerm(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTN
 }
 
 /// Parsing function which parses groups, character classes, or regular characters (atoms) and their postfix quantifiers.
-fn parseFactor(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTNode {
+fn parseFactor(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     const len = scanner.strlen();
     if (scanner.ptr() >= len) return core_types.ParsingError.EndOfString;
 
@@ -113,7 +110,7 @@ fn parseFactor(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.AS
     // -------------------
     if (scanner.scanSeeCharacter('(') and !scanner.scanSeeIsEscaped()) {
         try scanner.scanConsumeCharacter('(');
-        const result: *ast_types.ASTNode = try parseGroupExpr(allocator, scanner);
+        const result: *ASTNode = try parseGroupExpr(allocator, scanner);
         errdefer result.deinit(allocator);
         try scanner.scanConsumeCharacter(')');
         if (scanner.ptr() < len) { // Don't check quantifiers when ) is at the end of the string.
@@ -136,7 +133,7 @@ fn parseFactor(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.AS
     const metacharacter = isMetaCharacter(try scanner.scanReturnCurrentCharacter(), escaped);
     const char_to_set = try simplifiedEscapeCharacter(scanner, escaped);
     
-    var atom: ?*ast_types.ASTNode = null;
+    var atom: ?*ASTNode = null;
     errdefer {
         if (atom) |_| atom.?.deinit(allocator);
     }
@@ -154,11 +151,10 @@ fn parseFactor(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.AS
 }
 
 /// Parsing function which handles groupings.
-fn parseGroupExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTNode {
+fn parseGroupExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     const len = scanner.strlen();
     if (scanner.ptr() >= len) return core_types.ParsingError.EndOfString;
-    const result: *ast_types.ASTNode = try allocator.create(ast_types.ASTNode);
-    result.* = .failed_parse;
+    const result: *ASTNode = try ASTNode.create(allocator, .failed_parse);
     errdefer result.deinit(allocator);
     if (scanner.scanSeeCharacter('?')) {
         if (scanner.scanHaveString("?<=")) {
@@ -199,7 +195,7 @@ fn parseGroupExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types
 }
 
 /// Parsing function which handles character classes.
-fn parseCharCLass(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTNode {
+fn parseCharCLass(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     if (scanner.ptr() >= scanner.strlen()) return core_types.ParsingError.EndOfString;
     var result_list = try std.ArrayList(ast_types.AtomNode).initCapacity(allocator, 1);
     defer {
@@ -224,13 +220,13 @@ fn parseCharCLass(allocator: anytype, scanner: *ScanContext) anyerror!*ast_types
         return core_types.ParsingError.EndOfString;
     }
     const list_slice = try result_list.toOwnedSlice(allocator);
-    const result = try allocator.create(ast_types.ASTNode);
+    const result = try allocator.create(ASTNode);
     result.* = .{ .class = .{ .items = list_slice, .negated = negated } };
     return result;
 }
 
 /// Parsing function which handles postfix quantifier operations on atom nodes (i.e. {1}, +, *, etc.)
-fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, scanner: *ScanContext) anyerror!*ast_types.ASTNode {
+fn parseQuantifiers(atom: *ASTNode, allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     var count_min: usize = undefined;
     var count_max: repetition_types.RepetitionBoundType = undefined;
     if (scanner.ptr() >= scanner.strlen()) {
@@ -290,14 +286,13 @@ fn parseQuantifiers(atom: *ast_types.ASTNode, allocator: anytype, scanner: *Scan
     } else if (scanner.scanHaveCharacter('?')) {
         rep_type = .lazy;
     }
-    const atom_parent = try allocator.create(ast_types.ASTNode); // Construct repetition node and wrap atom in it.
-    atom_parent.* = .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } };
+    const atom_parent = try ASTNode.createWithData(allocator, .{ .repetition = .{ .child = atom, .reps = repetition_container, .rep_type = rep_type } }); // Construct repetition node and wrap atom in it.
     return atom_parent;
 }
 
 /// Parses a single character which does not have a special syntactic function. Note that an escaped character, metacharacter or otherwise,
 /// which meets this description is parsed here (i.e. \d, \n, a, ., etc.)
-fn parseAtom(allocator: anytype, scanner: *ScanContext, char_to_set: u8, metacharacter: bool) anyerror!*ast_types.ASTNode {
+fn parseAtom(allocator: anytype, scanner: *ScanContext, char_to_set: u8, metacharacter: bool) anyerror!*ASTNode {
     var atom_result: ast_types.AtomNode = undefined;
     switch (metacharacter) {
         true => {
@@ -376,7 +371,7 @@ fn parseAtom(allocator: anytype, scanner: *ScanContext, char_to_set: u8, metacha
             atom_result = .{ .atom = .{ .generic = char_to_set }, .inverted = false };
         },
     }
-    const result = try allocator.create(ast_types.ASTNode);
+    const result = try allocator.create(ASTNode);
     result.* = .{ .atom = atom_result };
     return result;
 }
