@@ -4,13 +4,6 @@ const builtin = @import("builtin");
 const cabi = @import("zregex_header");
 
 pub fn main(init: std.process.Init) !void {
-    // var gpa = std.heap.DebugAllocator(.{}){}; // Dynamic lib program only uses heap for simplicity.
-    // const allocator = gpa.allocator();
-    // defer {
-    //     _ = gpa.deinit();
-    // }
-    // std.debug.print("Using allocator type {s}\n", .{@typeName(@TypeOf(gpa))});
-
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     defer init.arena.allocator().free(args);
     if (args.len < 3) {
@@ -28,7 +21,7 @@ pub fn main(init: std.process.Init) !void {
     const compiled_pattern = cabi.zregex_compile(pattern);
     defer cabi.zregex_destroy_pattern(compiled_pattern);
     try stdout.print("AST:\n", .{});
-    cabi.zregex_print_ast(compiled_pattern, .{.show_match_width = true });
+    cabi.zregex_print_ast(compiled_pattern, .{.show_match_width = false });
     try stdout.print("\nBytecode:\n", .{});
     cabi.zregex_print_bytecode(compiled_pattern);
     try stdout.print("\nMatch against string {s}:\n", .{string_to_match});

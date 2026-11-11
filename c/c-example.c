@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     printf("String: %s, Pattern: %s\n", string_to_match, pattern); // So string and pattern print before errors.
     void *compiled_pattern = zregex_compile(pattern);
     printf("AST:\n");
-    ASTPrintOptions x = { true };
+    ASTPrintOptions x = { false };
     zregex_print_ast(compiled_pattern, x);
     printf("\nBytecode:\n");
     zregex_print_bytecode(compiled_pattern);
