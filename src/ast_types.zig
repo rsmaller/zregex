@@ -193,45 +193,82 @@ pub const ASTNode = union(enum) {
         ret.* = data;
         return ret;
     }
-    pub fn equals(self: *const ASTNode, other: anytype) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
-        comptime {
-            if (type_reflection.UnwrappedPointer(@TypeOf(other)) != ASTNode) {
-                @compileError("Type of other node for comparison between ASTNode must also be a ASTNode or *ASTNode");
-            }
+    /// Returns a 1-to-1 copy of an AST using a recursive deep copy.
+    pub fn duplicate(self: *const ASTNode, allocator: anytype) !*@This() {
+        const ret = try allocator.create(ASTNode);
+        errdefer allocator.destroy(ret);
+        ret.* = self.*; // Copy the entire node's data over and re-assign pointers after.
+        switch (ret.*) {
+            .atom => |*atom| { // Right now, only have to duplicate backref name. If changed, make sure deep copy respects that!
+                switch (atom.atom) {
+                    .backref_name => |name| {
+                       atom.atom.backref_name = try allocator.dupe(u8, name); // duplicate backref name.
+                    },
+                    else => {},
+                }
+            },
+            .concatenation => |*concat| {
+                for (concat.parts, 0..) |item, i| {
+                    concat.parts[i] = try item.duplicate(allocator); // Recursively duplicate every item in concat.
+                } 
+            },
+            .alternation => |*alt| {
+                for (alt.parts, 0..) |item, i| {
+                    alt.parts[i] = try item.duplicate(allocator);
+                }
+            },
+            .group => |*grp| {
+                if (grp.name) |name| {
+                    grp.name = try allocator.dupe(u8, name);
+                } else {
+                    grp.name = null; // Shouldn't be necessary but just in case. 
+                }
+                grp.expr = try grp.expr.duplicate(allocator);
+            },
+            .repetition => |*rep| {
+                rep.child = try rep.child.duplicate(allocator);
+            },
+            .class => |*cls| {
+                cls.items = try allocator.dupe(AtomNode, cls.items);
+            },
+            .epsilon => {},
+            .failed_parse => {},
         }
-        const other_unwrapped_pointer: ASTNode = type_reflection.unwrapPointer(other);
-        if (std.meta.activeTag(self.*) != std.meta.activeTag(other_unwrapped_pointer)) {
+        return ret;
+    }
+    pub fn equals(self: *const ASTNode, other: *const ASTNode) bool { // ASTs should be stored as pointers; expects comparison between pointer types.
+        if (std.meta.activeTag(self.*) != std.meta.activeTag(other.*)) {
             return false;
         }
         switch (self.*) {
             .atom => {
-                if (!self.atom.equals(other_unwrapped_pointer.atom)) {
+                if (!self.atom.equals(other.atom)) {
                     return false;
                 }
             },
             .alternation => |alt| {
-                if (!alt.equals(other_unwrapped_pointer.alternation)) {
+                if (!alt.equals(other.alternation)) {
                     return false;
                 }
             },
             .concatenation => |concat| {
-                if (!concat.equals(other_unwrapped_pointer.concatenation)) {
+                if (!concat.equals(other.concatenation)) {
                     return false;
                 }
             },
             .group => |grp| {
-                if (!grp.equals(other_unwrapped_pointer.group)) {
+                if (!grp.equals(other.group)) {
                     return false;
                 }
             },
             .repetition => |rep| {
-                if (!rep.equals(other_unwrapped_pointer.repetition)) {
+                if (!rep.equals(other.repetition)) {
                     return false;
                 }
             },
             .class => |class_item| {
-                if (!class_item.equals(other_unwrapped_pointer.class)) {
-                    return false;
+                if (!class_item.equals(other.class)) { // Compiler decided to complain about "access of union field 'class' while field 'class' is active".
+                    return false;                      // Could be another bug? @ptrCast() fixes it, for now.
                 }
             },
             .epsilon => {}, // Epsilons and failed parses contain no data and are always the same.

@@ -16,6 +16,6 @@ def main():
     if (fuzz_count == "unlimited"):
         system(f"zig build --fuzz -Dfuzzlen={fuzz_buflen} -Doptimize=ReleaseFast -Dtest-filter={filter} test")
     else:
-        system(f"zig build --fuzz={fuzz_count} -Dfuzzlen={fuzz_buflen} -Doptimize=ReleaseFast -Dtest-filter={filter} test")
+        system(f"zig build --fuzz={fuzz_count} -Dfuzzlen={fuzz_buflen} -Doptimize=Debug -Dtest-filter={filter} test")
 
 main()

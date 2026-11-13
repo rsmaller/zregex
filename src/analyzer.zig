@@ -4,6 +4,8 @@ const core_types = @import("core_types.zig");
 const repetition_types = @import("repetition_types.zig");
 const type_reflection = @import("type_reflection.zig");
 
+const ast_optimization_unroll = 4;
+
 pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedAST {
     var current_grp_id: usize = 1;
     try genericASTAnalyze(ast, &current_grp_id); // Analysis tree-walks split from trimming to simplify debugging; may be merged at a later date.
@@ -338,9 +340,10 @@ fn removeDuplicatesAST(allocator: anytype, arr: []*ast_types.ASTNode) !@TypeOf(a
         if (freed[i]) continue;
         try list.append(allocator, item);
         for (i + 1..arr.len) |j| {
+            if (freed[j]) continue;
             if (arr[i].equals(arr[j])) {
-                freed[j] = true;
                 arr[j].deinit(allocator);
+                freed[j] = true;
             }
         }
     }
@@ -350,9 +353,10 @@ fn removeDuplicatesAST(allocator: anytype, arr: []*ast_types.ASTNode) !@TypeOf(a
 /// Type-generic duplicate removal function. Makes a copy of an array without duplicates, in-order. Assumes that pointer 
 /// elements are heap-allocated and single-pointers. Types must be trivially comparable or structs/unions that implement 
 /// an equals() method for duplicate checking.
-fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
+fn removeClassDuplicates(allocator: anytype, arr: []ast_types.AtomNode) !@TypeOf(arr) {
     const T = @TypeOf(arr[0]);
     var list = try std.ArrayList(T).initCapacity(allocator, 1);
+    errdefer list.deinit(allocator);
     var freed = try allocator.alloc(bool, arr.len);
     defer allocator.free(freed);
     @memset(freed, false);
@@ -360,26 +364,64 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
         if (freed[i]) continue;
         try list.append(allocator, item);
         for (i + 1..arr.len) |j| {
-            if (type_reflection.genericEqualityDispatch(arr[i], arr[j])) {
+            if (freed[j]) continue;
+            if (arr[i].equals(arr[j])) {
                 freed[j] = true;
-                switch (comptime @typeInfo(T)) {
-                    .pointer => |ptr| { // Function assumes AST-like structure where pointers are on the heap.
-                        if (comptime type_reflection.unwrappedPointerIndirectionCount(T) != 1) {
-                            @compileError("Excessively indirected pointer attempted to be freed! Please only pass in single pointers here.");
-                        } else if (comptime type_reflection.declExists(ptr.child, "deinit", std.builtin.Type.Fn)) {
-                            arr[j].deinit(allocator);
-                        } else {
-                            try allocator.free(arr[j]);
-                        }
-                    },
-                    else => {},
-                }
             }
         }
     }
     return try list.toOwnedSlice(allocator);
 }
         
+fn truncateRedundantRepetition(allocator: anytype, ast: *ast_types.ASTNode) !bool {
+    if (ast.repetition.reps.equals(.{.min = 0, .max = .{.bounded = 0}})) { // Replace 0 length repetitions with epsilon; they will never run anyway.
+        const destroy = ast.repetition.child;
+        ast.* = .epsilon;
+        destroy.deinit(allocator);
+        return true;
+    } else if (ast.repetition.reps.equals(.{.min = 1, .max = .{.bounded = 1}})) { // Truncation trick similar to one-alternation alternations. 
+        const rep_to_free = ast.repetition.child;                                 // This overwrites the current AST node with the repetition's 
+        ast.* = ast.repetition.child.*;                                           // child when the repetition is meaningless (i.e. {1} or {1,1}).
+        allocator.destroy(rep_to_free);                                           // Again, do NOT access "rep" after the AST overwrite!
+        return true;
+    }
+    return false;
+}
+
+fn unrollRepetitions(allocator: anytype, ast: *ast_types.ASTNode) !void {
+    const unroll_amount: usize = if (ast.repetition.reps.min >= ast_optimization_unroll) ast_optimization_unroll else ast.repetition.reps.min;
+    var concat_alloc: []*ast_types.ASTNode = undefined;
+    const repetition_at_end: bool = !repetition_types.repetitionCountCmp(unroll_amount, ast.repetition.reps.max, .EQ);
+    if (repetition_at_end) {
+        concat_alloc = try allocator.alloc(*ast_types.ASTNode, unroll_amount + 1);
+    } else {
+        concat_alloc = try allocator.alloc(*ast_types.ASTNode, unroll_amount);
+    }
+    var i: usize = 0; // Amount of successfully allocated copies in concatenation.
+    errdefer { 
+        for (0..i) |j| {
+            concat_alloc[j].deinit(allocator);
+        }
+        allocator.free(concat_alloc);
+    }
+    while (i < unroll_amount) : (i += 1) {
+        concat_alloc[i] = try ast.repetition.child.duplicate(allocator);
+    }
+    if (repetition_at_end) {
+        concat_alloc[unroll_amount] = try ast_types.ASTNode.createWithData(allocator, ast.*); // Reuse the current repetition as the final one in concat.
+                                                                                              // The parent AST will be set to the concatenation node that 
+                                                                                              // contains concat_alloc, preventing any dangling pointers.
+        i += 1; // Mark end as valid.
+        concat_alloc[unroll_amount].repetition.reps.min -= unroll_amount; // Subtract what was unrolled from the remaining min and max.
+        switch(concat_alloc[unroll_amount].repetition.reps.max) {
+            .bounded => |*bound| {
+                bound.* -= unroll_amount;
+            },
+            else => {},
+        }
+    }
+    ast.* = .{.concatenation = .{.parts = concat_alloc} }; // Overwrite main AST repetition node with concatenation.
+}
 
 fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
     switch (ast.*) {
@@ -411,22 +453,15 @@ fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
             }
         },
         .repetition => |rep| {
-            if (rep.reps.equals(.{.min = 0, .max = .{.bounded = 0}})) { // Replace 0 length repetitions with epsilon; they will never run anyway.
-                const destroy = rep.child;
-                ast.* = .epsilon;
-                destroy.deinit(allocator);
-            } else if (rep.reps.equals(.{.min = 1, .max = .{.bounded = 1}})) { // Truncation trick similar to one-alternation alternations. 
-                const rep_to_free = rep.child;                                 // This overwrites the current AST node with the repetition's 
-                ast.* = rep.child.*;                                           // child when the repetition is meaningless (i.e. {1} or {1,1}).
-                allocator.destroy(rep_to_free);                                // Again, do NOT access "rep" after the AST overwrite!
-            } else {
-                try trimAST(allocator, rep.child);
-            } // Note for the future; repetition unrolling should happen after trimming the child node. The child node that gets duplicated 
-              // should already be trimmed.
+            if (try truncateRedundantRepetition(allocator, ast)) return;
+            try trimAST(allocator, rep.child);
+            if (rep.reps.min != 0) {
+                try unrollRepetitions(allocator, ast);
+            }
         },
         .class => |*cls| {
             const old_cls_items = cls.items;
-            cls.items = try removeDuplicates(allocator, cls.items);
+            cls.items = try removeClassDuplicates(allocator, cls.items);
             allocator.free(old_cls_items);
         },
         else => {

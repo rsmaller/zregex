@@ -37,3 +37,39 @@ pub const RepetitionRangeType = struct {
         return true;
     }
 };
+
+pub const ComparisonType = enum { LT, LE, EQ, GT, GE };
+
+pub fn repetitionCountCmp(count: usize, max: RepetitionBoundType, cmp: ComparisonType) bool {
+    switch (max) {
+        .bounded => |bounded_max| {
+            switch (cmp) {
+                .LT => {
+                    return count < bounded_max;
+                },
+                .LE => {
+                    return count <= bounded_max;
+                },
+                .EQ => {
+                    return count == bounded_max;
+                },
+                .GT => {
+                    return count > bounded_max;
+                },
+                .GE => {
+                    return count >= bounded_max;
+                },
+            }
+        },
+        .unbounded => {
+            switch (cmp) {
+                .LT, .LE => {
+                    return true;
+                },
+                .GT, .GE, .EQ => {
+                    return false;
+                },
+            }
+        },
+    }
+}

@@ -306,7 +306,7 @@ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !v
     };
     if (current_count < min) {
         self.jmp(jump_index); // there should not be a choice point saved here; there is no backtracking to be done with a different amount because min is the minimum allowed in range.
-    } else if (repetitionCountCmp(current_count, max, .GE) or !self.repetition_consumed_input) { // Exit if within range and repetition did not consume anything, or if past max.
+    } else if (repetition_types.repetitionCountCmp(current_count, max, .GE) or !self.repetition_consumed_input) { // Exit if within range and repetition did not consume anything, or if past max.
         self.current_rep_ptr = current_frame_ref.previous_rep_ptr; // set to previous rep frame when exiting.
         self.jmp(self.ip + 1);
         self.repetition_consumed_input = true; // Set back to true when exiting to ensure future repetitions do not exit early.
@@ -378,7 +378,7 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
                     },
                     .possessive => { // Exit repetition if within range; otherwise fail the match.
                         self.current_rep_ptr = rep.previous_rep_ptr;
-                        if (repetitionCountCmp(current_count, rep.max, .LE) and current_count >= rep.min) {
+                        if (repetition_types.repetitionCountCmp(current_count, rep.max, .LE) and current_count >= rep.min) {
                             self.jmp(rep.escape_jmp_index);
                             return true;
                         } else {
@@ -414,42 +414,6 @@ fn backtrack(self: *@This(), allocator: anytype, options: BacktrackOptions) !boo
         }
     }
     return false;
-}
-
-// PRIVATE NON-MEMBER FUNCTIONS AND PRIVATE TYPES
-// Private function for count comparison.
-fn repetitionCountCmp(count: usize, max: repetition_types.RepetitionBoundType, cmp: ComparisonType) bool {
-    switch (max) {
-        .bounded => |bounded_max| {
-            switch (cmp) {
-                .LT => {
-                    return count < bounded_max;
-                },
-                .LE => {
-                    return count <= bounded_max;
-                },
-                .EQ => {
-                    return count == bounded_max;
-                },
-                .GT => {
-                    return count > bounded_max;
-                },
-                .GE => {
-                    return count >= bounded_max;
-                },
-            }
-        },
-        .unbounded => {
-            switch (cmp) {
-                .LT, .LE => {
-                    return true;
-                },
-                .GT, .GE, .EQ => {
-                    return false;
-                },
-            }
-        },
-    }
 }
 
 fn literalMatch(literal: instruction_types.LiteralInstruction, string: []const u8, index: usize) ConditionalConsumingMatch {
@@ -546,7 +510,6 @@ const ConditionalConsumingMatch = struct {
     consuming: bool,
 };
 
-const ComparisonType = enum { LT, LE, EQ, GT, GE };
 
 const BacktrackOptions = struct {
     allow_across_lookthroughs: bool = false, // prevents always allowing backtracks to a negative lookthrough frame to succeed if the backtrack is triggered by a negative end instruction.
