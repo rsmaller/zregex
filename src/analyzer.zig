@@ -89,9 +89,27 @@ fn genericASTAnalyze(ast: *ast_types.ASTNode, id: *usize) !void {
                     ast.group.id = id.*;
                     id.* += 1;
                 },
-                .non_capturing => {
+                .non_capturing => |non_capt| {
                     ast.group.id = null;
-                },
+                    switch (non_capt) {
+                        .lookbehind => {
+                            const len = matchRequirementRange(grp.expr) catch {
+                                return core_types.ParsingError.VariableLookbehindRange;
+                            };
+                            switch (len.max) {
+                                .unbounded => {
+                                    return core_types.ParsingError.VariableLookbehindRange;
+                                },
+                                .bounded => {
+                                    if (len.max.bounded != len.min) {
+                                        return core_types.ParsingError.VariableLookbehindRange;
+                                    }
+                                },
+                            }
+                        }, 
+                        else => {},
+                    }
+                }
             }
             try genericASTAnalyze(grp.expr, id);
         }, // outside of group, just recurse.
@@ -366,38 +384,14 @@ fn removeDuplicates(allocator: anytype, arr: anytype) !@TypeOf(arr) {
 fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
     switch (ast.*) {
         .group => |grp| {
-            switch (grp.type) {
-                .capturing => {},
-                .non_capturing => |non_capt| {
-                    switch (non_capt) {
-                        .lookbehind => {
-                            const len = matchRequirementRange(grp.expr) catch {
-                                return core_types.ParsingError.VariableLookbehindRange;
-                            };
-                            switch (len.max) {
-                                .unbounded => {
-                                    return core_types.ParsingError.VariableLookbehindRange;
-                                },
-                                .bounded => {
-                                    if (len.max.bounded != len.min) {
-                                        return core_types.ParsingError.VariableLookbehindRange;
-                                    }
-                                    ast.group.type.non_capturing.lookbehind = len.max.bounded;
-                                },
-                            }
-                        },
-                        else => {},
-                    }
-                },
-            }
             try trimAST(allocator, grp.expr);
-        }, // outside of group, just recurse.
+        }, 
         .alternation => |*alt| {
             const old_alt_parts = alt.parts;
             alt.parts = try removeDuplicatesAST(allocator, alt.parts);
             allocator.free(old_alt_parts);
             if (alt.parts.len == 1) {
-                const old_alt_item: *ast_types.ASTNode = @alignCast(alt.parts[0]);
+                const old_alt_item: *ast_types.ASTNode = alt.parts[0];
                 allocator.free(alt.parts);
                 ast.* = old_alt_item.*; // Truncation trick that overwrites the alternation node with its first and only alternation.
                                         // This simplifies the AST and prevents single-alternation alternation nodes after analysis.
@@ -417,13 +411,18 @@ fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
             }
         },
         .repetition => |rep| {
-            if (rep.reps.equals(.{.min = 1, .max = .{.bounded = 1}})) { // Truncation trick similar to one-alternation alternations. 
-                const rep_to_free = rep.child;                          // This overwrites the current AST node with the repetition's 
-                ast.* = rep.child.*;                                    // child when the repetition is meaningless (i.e. {1} or {1,1}).
-                allocator.destroy(rep_to_free);                         // Again, do NOT access "rep" after the AST overwrite!
+            if (rep.reps.equals(.{.min = 0, .max = .{.bounded = 0}})) { // Replace 0 length repetitions with epsilon; they will never run anyway.
+                const destroy = rep.child;
+                ast.* = .epsilon;
+                destroy.deinit(allocator);
+            } else if (rep.reps.equals(.{.min = 1, .max = .{.bounded = 1}})) { // Truncation trick similar to one-alternation alternations. 
+                const rep_to_free = rep.child;                                 // This overwrites the current AST node with the repetition's 
+                ast.* = rep.child.*;                                           // child when the repetition is meaningless (i.e. {1} or {1,1}).
+                allocator.destroy(rep_to_free);                                // Again, do NOT access "rep" after the AST overwrite!
             } else {
                 try trimAST(allocator, rep.child);
-            }
+            } // Note for the future; repetition unrolling should happen after trimming the child node. The child node that gets duplicated 
+              // should already be trimmed.
         },
         .class => |*cls| {
             const old_cls_items = cls.items;
