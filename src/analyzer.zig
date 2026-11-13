@@ -9,7 +9,8 @@ const ast_optimization_unroll = 4;
 pub fn analyze(allocator: anytype, ast: *ast_types.ASTNode) !ast_types.AnalyzedAST {
     var current_grp_id: usize = 1;
     try genericASTAnalyze(ast, &current_grp_id); // Analysis tree-walks split from trimming to simplify debugging; may be merged at a later date.
-    try trimAST(allocator, ast);
+    try trimASTGeneric(allocator, ast);
+    try trimASTConcatenations(allocator, ast);
     var mapping = try mapNames(allocator, ast);
     errdefer {
         mapping.id_to_name_map.deinit();
@@ -423,10 +424,66 @@ fn unrollRepetitions(allocator: anytype, ast: *ast_types.ASTNode) !void {
     ast.* = .{.concatenation = .{.parts = concat_alloc} }; // Overwrite main AST repetition node with concatenation.
 }
 
-fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
+/// Trims unecessary nesting of concatenations that the previous trimming steps can sometimes generate.
+fn trimASTConcatenations(allocator: anytype, ast: *ast_types.ASTNode) !void {
     switch (ast.*) {
         .group => |grp| {
-            try trimAST(allocator, grp.expr);
+            try trimASTConcatenations(allocator, grp.expr);
+        }, 
+        .alternation => |*alt| {
+            for (alt.parts) |item| {
+                try trimASTConcatenations(allocator, item); // recurse after trimming.
+            }
+        },
+        .concatenation => |*concat| {
+            var concat_found: bool = true;
+            var current_concat_index: usize = undefined;
+            while (concat_found) {
+                concat_found = false;
+                for (concat.parts, 0..) |item, i| {
+                    if (std.meta.activeTag(item.*) == .concatenation) {
+                        concat_found = true;
+                        current_concat_index = i;
+                        break;
+                    }
+                }
+                if (concat_found) {
+                    const current_concat = concat.parts[current_concat_index].concatenation;
+                    const current_concat_len = current_concat.parts.len;
+                    const new_total_alloc_len = concat.parts.len + current_concat_len - 1; // -1 because this concat is already in concat.parts.
+                    var new_concat_alloc = try allocator.alloc(*ast_types.ASTNode, new_total_alloc_len);
+                    @memcpy(new_concat_alloc[0..current_concat_index], concat.parts[0..current_concat_index]); // Copy lefthand side into new arr.
+                    @memcpy(new_concat_alloc[current_concat_index..current_concat_index + current_concat_len],
+                            current_concat.parts[0..]); // Copy child concat nodes into new arr.
+                    @memcpy(new_concat_alloc[current_concat_index + current_concat_len..], 
+                        concat.parts[current_concat_index + 1..]); // Copy righthand side, excluding current concat.
+                    allocator.free(current_concat.parts);
+                    allocator.destroy(concat.parts[current_concat_index]);
+                    const to_free = concat.parts;
+                    concat.parts = new_concat_alloc;
+                    allocator.free(to_free);
+                }
+            }
+
+            // Do this after concat squashing.
+            for (concat.parts) |item| {
+                try trimASTConcatenations(allocator, item);
+            }
+        },
+        .repetition => |rep| {
+            try trimASTConcatenations(allocator, rep.child);
+        },
+        .class => {},
+        else => {
+            return;
+        },
+    }
+}
+
+fn trimASTGeneric(allocator: anytype, ast: *ast_types.ASTNode) !void {
+    switch (ast.*) {
+        .group => |grp| {
+            try trimASTGeneric(allocator, grp.expr);
         }, 
         .alternation => |*alt| {
             const old_alt_parts = alt.parts;
@@ -440,21 +497,21 @@ fn trimAST(allocator: anytype, ast: *ast_types.ASTNode) !void {
                                         // DO NOT ACCESS "alt" AFTER THIS LINE IN THIS SCOPE! The alternation tag is no longer active
                                         // after this line.
                 allocator.destroy(old_alt_item);
-                try trimAST(allocator, ast); // Re-trim AST as the truncated alternation part.
+                try trimASTGeneric(allocator, ast); // Re-trim AST as the truncated alternation part.
             } else {
                 for (alt.parts) |item| {
-                    try trimAST(allocator, item); // recurse after trimming.
+                    try trimASTGeneric(allocator, item); // recurse after trimming.
                 }
             }
         },
         .concatenation => |concat| {
             for (concat.parts) |item| {
-                try trimAST(allocator, item);
+                try trimASTGeneric(allocator, item);
             }
         },
         .repetition => |rep| {
             if (try truncateRedundantRepetition(allocator, ast)) return;
-            try trimAST(allocator, rep.child);
+            try trimASTGeneric(allocator, rep.child);
             if (rep.reps.min != 0) {
                 try unrollRepetitions(allocator, ast);
             }

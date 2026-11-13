@@ -208,14 +208,18 @@ pub const ASTNode = union(enum) {
                 }
             },
             .concatenation => |*concat| {
+                const new_alloc = try allocator.alloc(*ASTNode, concat.parts.len);
                 for (concat.parts, 0..) |item, i| {
-                    concat.parts[i] = try item.duplicate(allocator); // Recursively duplicate every item in concat.
+                    new_alloc[i] = try item.duplicate(allocator); // Recursively duplicate every item in concat.
                 } 
+                concat.parts = new_alloc;
             },
             .alternation => |*alt| {
+                const new_alloc = try allocator.alloc(*ASTNode, alt.parts.len);
                 for (alt.parts, 0..) |item, i| {
-                    alt.parts[i] = try item.duplicate(allocator);
+                    new_alloc[i] = try item.duplicate(allocator);
                 }
+                alt.parts = new_alloc;
             },
             .group => |*grp| {
                 if (grp.name) |name| {
@@ -287,29 +291,29 @@ pub const ASTNode = union(enum) {
                 }
                 allocator.destroy(self);
             },
-            .alternation => |alt| {
+            .alternation => |alt| { // Comments are on calls to deinit for debugging convenience since the deinit function gets name-mangled.
                 for (alt.parts) |item| {
-                    item.deinit(allocator);
+                    item.deinit(allocator); // Alternation deinit.
                 }
                 allocator.free(alt.parts);
                 allocator.destroy(self);
             },
             .concatenation => |concat| {
                 for (concat.parts) |item| {
-                    item.deinit(allocator);
+                    item.deinit(allocator); // Concatenation deinit.
                 }
                 allocator.free(concat.parts);
                 allocator.destroy(self);
             },
             .group => |grp| {
-                grp.expr.deinit(allocator);
+                grp.expr.deinit(allocator); // Group child deinit.
                 if (grp.name) |_| {
                     allocator.free(grp.name.?);
                 }
                 allocator.destroy(self);
             },
             .repetition => |rep| {
-                rep.child.deinit(allocator);
+                rep.child.deinit(allocator); // Repetition child deinit.
                 allocator.destroy(self);
             },
             .class => |class_item| {

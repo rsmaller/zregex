@@ -24,7 +24,7 @@ test "parser" {
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len = smith.slice(&data);
             if (!is_ascii_string_printable(data[0..len])) { return; }
-            const file = try std.Io.Dir.cwd().createFile(std.testing.io, "/tmp/fuzzy/input.txt", .{});
+            const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test/input.txt", .{});
             var buf: [1000]u8 = @splat(0);
             var file_writer = file.writer(std.testing.io, &buf);
             var file_writer_int = &file_writer.interface;
