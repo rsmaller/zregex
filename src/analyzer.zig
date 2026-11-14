@@ -469,7 +469,6 @@ fn trimASTConcatenations(allocator: anytype, ast: *ast_types.ASTNode) !void {
                     allocator.free(to_free);
                 }
             }
-
         },
         .repetition => |rep| {
             try trimASTConcatenations(allocator, rep.child);
