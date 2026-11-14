@@ -139,7 +139,7 @@ fn parseFactor(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     }
     if (char_to_set == '[' and !escaped) { // If character is a '[' and has not been escaped, then start parsing as a character class.
         try scanner.scanConsumeCharacter('[');
-        atom = try parseCharCLass(allocator, scanner);
+        atom = try parseCharClass(allocator, scanner);
         try scanner.scanConsumeCharacter(']');
     } else {
         atom = try parseAtom(allocator, scanner, char_to_set, metacharacter);
@@ -195,7 +195,7 @@ fn parseGroupExpr(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
 }
 
 /// Parsing function which handles character classes.
-fn parseCharCLass(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
+fn parseCharClass(allocator: anytype, scanner: *ScanContext) anyerror!*ASTNode {
     if (scanner.ptr() >= scanner.strlen()) return core_types.ParsingError.EndOfString;
     var result_list = try std.ArrayList(ast_types.AtomNode).initCapacity(allocator, 1);
     defer {
