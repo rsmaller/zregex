@@ -330,7 +330,7 @@ pub fn matchRequirementRange(ast: *const ast_types.ASTNode) core_types.AnalysisE
 }
 
 /// Makes a copy of an array of AST nodes without duplicates, in-order. Assumes that pointer elements are heap-allocated and single-pointers.
-fn removeDuplicatesAST(allocator: anytype, arr: []*ast_types.ASTNode) !@TypeOf(arr) {
+fn removeASTDuplicates(allocator: anytype, arr: []*ast_types.ASTNode) !@TypeOf(arr) {
     const T = @TypeOf(arr[0]);
     var list = try std.ArrayList(T).initCapacity(allocator, 1);
     errdefer list.deinit(allocator);
@@ -420,6 +420,8 @@ fn unrollRepetitions(allocator: anytype, ast: *ast_types.ASTNode) !void {
             },
             else => {},
         }
+    } else {
+        ast.repetition.child.deinit(allocator); // If there is no repetition at the end, destroy everything associated with the repetition node and leave only the duplicated ones.
     }
     ast.* = .{.concatenation = .{.parts = concat_alloc} }; // Overwrite main AST repetition node with concatenation.
 }
@@ -436,6 +438,9 @@ fn trimASTConcatenations(allocator: anytype, ast: *ast_types.ASTNode) !void {
             }
         },
         .concatenation => |*concat| {
+            for (concat.parts) |item| {
+                try trimASTConcatenations(allocator, item);
+            }
             var concat_found: bool = true;
             var current_concat_index: usize = undefined;
             while (concat_found) {
@@ -465,10 +470,6 @@ fn trimASTConcatenations(allocator: anytype, ast: *ast_types.ASTNode) !void {
                 }
             }
 
-            // Do this after concat squashing.
-            for (concat.parts) |item| {
-                try trimASTConcatenations(allocator, item);
-            }
         },
         .repetition => |rep| {
             try trimASTConcatenations(allocator, rep.child);
@@ -480,6 +481,9 @@ fn trimASTConcatenations(allocator: anytype, ast: *ast_types.ASTNode) !void {
     }
 }
 
+/// Truncates redundant alternation, class, and repetition nodes. Note that concatenations
+/// are to be trimmed after this step because trimming repetitions can introduce new 
+/// concatenation nodes to be truncated.
 fn trimASTGeneric(allocator: anytype, ast: *ast_types.ASTNode) !void {
     switch (ast.*) {
         .group => |grp| {
@@ -487,7 +491,7 @@ fn trimASTGeneric(allocator: anytype, ast: *ast_types.ASTNode) !void {
         }, 
         .alternation => |*alt| {
             const old_alt_parts = alt.parts;
-            alt.parts = try removeDuplicatesAST(allocator, alt.parts);
+            alt.parts = try removeASTDuplicates(allocator, alt.parts);
             allocator.free(old_alt_parts);
             if (alt.parts.len == 1) {
                 const old_alt_item: *ast_types.ASTNode = alt.parts[0];
@@ -500,7 +504,7 @@ fn trimASTGeneric(allocator: anytype, ast: *ast_types.ASTNode) !void {
                 try trimASTGeneric(allocator, ast); // Re-trim AST as the truncated alternation part.
             } else {
                 for (alt.parts) |item| {
-                    try trimASTGeneric(allocator, item); // recurse after trimming.
+                    try trimASTGeneric(allocator, item); // recurse after trimming; no need to trim duplicates!
                 }
             }
         },
@@ -510,6 +514,9 @@ fn trimASTGeneric(allocator: anytype, ast: *ast_types.ASTNode) !void {
             }
         },
         .repetition => |rep| {
+            if (std.meta.activeTag(rep.reps.max) == .bounded and rep.reps.min > rep.reps.max.bounded) {
+                return core_types.AnalysisError.InvalidRepetition; 
+            }
             if (try truncateRedundantRepetition(allocator, ast)) return;
             try trimASTGeneric(allocator, rep.child);
             if (rep.reps.min != 0) {
