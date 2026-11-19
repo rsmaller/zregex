@@ -91,10 +91,12 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 try self.stack.push(allocator, .{ .repeat = .{ .min = rep.min, .mode = rep.mode, .max = rep.max, .previous_rep_ptr = self.current_rep_ptr, .previous_str_ptr =  self.str_ptr, .current_count = 0, .escape_jmp_index = rep.escape_jmp_index } });
                 self.current_rep_ptr = self.stack.elementCount() - 1;
                 if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
-                    try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                     if (rep.mode == .lazy) {
+                        try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = self.ip+1, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                         self.current_rep_ptr = (try self.currentRepFrameReference()).?.previous_rep_ptr;
                         self.jmp(rep.escape_jmp_index); // Get out early.
+                    } else {
+                        try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                     }
                 } // repeat_end points to the instruction after the repeat_start, which is the instruction in the context here.
             },
@@ -321,7 +323,7 @@ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !v
                 self.jmp(jump_index);
             },
             .lazy => {
-                self.current_rep_ptr = current_frame_ref.previous_rep_ptr; // set to previous rep frame when exiting.
+                // Repetition pointer should not be changed here; it is implicitly set in later repetition starts if needed.
                 try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                 self.jmp(self.ip + 1);
             },
@@ -346,7 +348,7 @@ fn restoreState(self: *@This(), allocator: anytype, str_ptr: ?usize, ip: ?usize,
             .group_start => {},
             .group_end => {},
             .repeat => |rep| { // Forced stack restoration should hand back repetitions to the VM where they left off where the stack is being restored to.
-                self.current_rep_ptr = rep.previous_rep_ptr;
+                 self.current_rep_ptr = rep.previous_rep_ptr;
             },
             .choice_point => {},
             .lookahead => {},
