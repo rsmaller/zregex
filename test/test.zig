@@ -23,16 +23,14 @@ test "parser" {
         var data: [test_options.fuzzlen]u8 = undefined;
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len = smith.slice(&data);
-            if (!is_ascii_string_printable(data[0..len])) { return; }
-            const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test/input.txt", .{});
-            var buf: [1000]u8 = @splat(0);
-            var file_writer = file.writer(std.testing.io, &buf);
-            var file_writer_int = &file_writer.interface;
-            try file_writer_int.print("{s}\n", .{data[0..len]});
-            try file_writer_int.flush();
-            file.close(std.testing.io);
+            // const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test/input.txt", .{});
+            // var buf: [1000]u8 = @splat(0);
+            // var file_writer = file.writer(std.testing.io, &buf);
+            // var file_writer_int = &file_writer.interface;
+            // try file_writer_int.print("{s}\n", .{data[0..len]});
+            // try file_writer_int.flush();
+            // file.close(std.testing.io);
             var item = zregex.compile(std.testing.allocator, data[0..len]) catch {
-                
                 return;
             }; // Compilation errors are OK, as long as they don't crash :)
             defer item.deinit();
@@ -52,11 +50,7 @@ test "vm" {
         fn fuzzFn(_: void, smith: *std.testing.Smith) !void {
             const len1 = smith.slice(&data1);
             const len2 = smith.slice(&data2);
-            
-            if (!is_ascii_string_printable(data1[0..len1])) { return; }
-            if (!is_ascii_string_printable(data2[0..len2])) { return; }
             var item = zregex.compile(std.testing.allocator, data1[0..len1]) catch  {
-                // std.debug.print("Parse error encountered: {s}\n", .{@errorName(err)});
                 return;
             }; // Compilation errors are OK, as long as they don't crash :)
             defer item.deinit();
