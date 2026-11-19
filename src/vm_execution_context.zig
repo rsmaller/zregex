@@ -92,6 +92,10 @@ pub fn internalMatch(self: *@This(), allocator: anytype, bytecode: []instruction
                 self.current_rep_ptr = self.stack.elementCount() - 1;
                 if (rep.min == 0 and rep.mode != .possessive) { // allow a backtrack before doing any repetition iterations.
                     try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = rep.escape_jmp_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
+                    if (rep.mode == .lazy) {
+                        self.current_rep_ptr = (try self.currentRepFrameReference()).?.previous_rep_ptr;
+                        self.jmp(rep.escape_jmp_index); // Get out early.
+                    }
                 } // repeat_end points to the instruction after the repeat_start, which is the instruction in the context here.
             },
             .repeat_end => |end| {
@@ -317,6 +321,7 @@ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !v
                 self.jmp(jump_index);
             },
             .lazy => {
+                self.current_rep_ptr = current_frame_ref.previous_rep_ptr; // set to previous rep frame when exiting.
                 try self.stack.push(allocator, .{ .choice_point = .{ .backtrack_ip = jump_index, .backtrack_str_ptr = self.str_ptr, .stack_depth = self.stack.len(), .previous_count = current_count, .previous_rep_ptr = self.current_rep_ptr } });
                 self.jmp(self.ip + 1);
             },
