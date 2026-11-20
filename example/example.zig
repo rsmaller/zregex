@@ -10,7 +10,7 @@ pub fn main(init: std.process.Init) !void {
     var AllocatorBackend = if (debug_enabled) std.heap.DebugAllocator(.{}){} else std.heap.FixedBufferAllocator.init(&fixed_alloc_buffer); // Use heap in debug mode and stack array for allocation in optimized mode.
     const allocator = AllocatorBackend.allocator();
     defer {
-        if (comptime zregex.type_reflection.declExists(@TypeOf(AllocatorBackend), "deinit", std.builtin.Type.Fn)) {
+        if (comptime zregex.type_reflection.declExists(@TypeOf(AllocatorBackend), "deinit", (&[_]type{std.builtin.Type.Fn})[0..] )) {
             _ = AllocatorBackend.deinit();
         }
     }

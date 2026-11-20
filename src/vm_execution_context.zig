@@ -5,6 +5,7 @@ const vm_execution_types = @import("vm_execution_types.zig");
 const core_types = @import("core_types.zig");
 const instruction_types = @import("instruction_types.zig");
 const repetition_types = @import("repetition_types.zig");
+const type_reflection = @import("type_reflection.zig");
 const zregex_build_options = @import("zregex_build_options");
 
 // VM stack re-namespacing for brevity.
@@ -336,7 +337,7 @@ fn repeatNextIteration(self: *@This(), allocator: anytype, jump_index: usize) !v
 
 /// Wipes frames for completed non-backtrackable constructs (i.e. lookaheads, lookbehinds, and atomics) and restores the VM state with an expected 
 /// input position and instruction pointer.
-fn restoreState(self: *@This(), allocator: anytype, str_ptr: ?usize, ip: ?usize, recover_frame_tag: @typeInfo(vm_execution_types.StackFrame).@"union".tag_type.?) !StackFrame {
+fn restoreState(self: *@This(), allocator: anytype, str_ptr: ?usize, ip: ?usize, recover_frame_tag: type_reflection.Tag(vm_execution_types.StackFrame)) !StackFrame {
     while (self.stack.hasItem()) {
         if (std.meta.activeTag(try self.stack.peek()) == recover_frame_tag) {
             if (str_ptr) |ptr| self.str_ptr = ptr;
