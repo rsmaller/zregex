@@ -89,8 +89,8 @@ pub fn Tag(comptime T: type) type {
         .@"enum" => {
             return T;
         },
-        .@"union" => {
-            return unwrapOptional(IntrospectedTypeInfoPayload(T).tag_type);
+        .@"union" => |uni| {
+            return unwrapOptional(uni.tag_type);
         },
         else => {
             return void;
